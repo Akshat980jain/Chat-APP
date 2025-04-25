@@ -1,0 +1,2407 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Box,
+  Grid,
+  Paper,
+  List,
+  ListItem,
+  ListItemAvatar,
+  ListItemText,
+  ListItemSecondaryAction,
+  Avatar,
+  TextField,
+  IconButton,
+  Typography,
+  Alert,
+  Button,
+  Badge,
+  Tab,
+  Tabs,
+  CircularProgress,
+  Tooltip,
+  AppBar,
+  Toolbar,
+  keyframes,
+  styled,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  useMediaQuery,
+  useTheme,
+  Fab,
+  Menu,
+  MenuItem,
+  Divider,
+  Switch,
+  FormControlLabel,
+  FormGroup
+} from '@mui/material';
+import { toast } from 'react-toastify';
+import SendIcon from '@mui/icons-material/Send';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import DoneIcon from '@mui/icons-material/Done';
+import DoneAllIcon from '@mui/icons-material/DoneAll';
+import PersonIcon from '@mui/icons-material/Person';
+import ChatIcon from '@mui/icons-material/Chat';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import PhoneIcon from '@mui/icons-material/Phone';
+import LogoutIcon from '@mui/icons-material/Logout';
+import DeleteIcon from '@mui/icons-material/Delete';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import CallIcon from '@mui/icons-material/Call';
+import VideocamIcon from '@mui/icons-material/Videocam';
+import { useAuth } from '../../contexts/AuthContext';
+import { useSocket } from '../../contexts/SocketContext';
+import axios from 'axios';
+import { format } from 'timeago.js';
+import AddChatByPhone from './AddChatByPhone';
+import { setAuthToken } from '../../contexts/AuthContext';
+import ProfileMenu from '../profile/ProfileMenu';
+import CallModal from '../call/CallModal';
+import IncomingCallAlert from '../call/IncomingCallAlert';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+
+// Use your machine's network IP address instead of localhost
+const API_BASE_URL = process.env.NODE_ENV === 'development' 
+  ? 'http://192.168.1.8:5000' 
+  : window.location.origin;
+
+// Configure axios with common settings
+axios.defaults.baseURL = API_BASE_URL;
+axios.defaults.timeout = 30000;
+axios.defaults.headers.post['Content-Type'] = 'application/json';
+
+// Define the flashing animation
+const flash = keyframes`
+  0%, 100% {
+    background-color: #2196f3;
+    color: white;
+  }
+  50% {
+    background-color: #64b5f6;
+    color: white;
+  }
+`;
+
+// Define the pulse animation for online status
+const pulseAnimation = keyframes`
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 5px rgba(76, 175, 80, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+  }
+`;
+
+// Define the playNotificationSound function before any useEffect hooks that reference it
+const playNotificationSound = () => {
+  try {
+    const audio = new Audio('/notification.mp3');
+    audio.volume = 0.5; // Set volume to 50%
+    
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(error => {
+        console.warn('Audio playback prevented by browser:', error);
+      });
+    }
+  } catch (error) {
+    console.error('Failed to play notification sound:', error);
+  }
+};
+
+// Define a helper function to get the correct image URL
+const getImageUrl = (url) => {
+  if (!url) return '';
+  
+  // If it's already a full URL, return it as is
+  if (url.startsWith('http')) {
+    console.log('Using absolute image URL:', url);
+    return url;
+  }
+  
+  // Make sure the URL starts with a slash if it doesn't already
+  const formattedUrl = url.startsWith('/') ? url : `/${url}`;
+  const fullUrl = `${API_BASE_URL}${formattedUrl}`;
+  
+  console.log('Formatted image URL:', fullUrl);
+  return fullUrl;
+};
+
+const Chat = () => {
+  const [users, setUsers] = useState([]);
+  const [chats, setChats] = useState([]);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedChat, setSelectedChat] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [apiError, setApiError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [connectionStatus, setConnectionStatus] = useState('connecting');
+  const messagesEndRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+  const { user, logout, recentlyLoggedIn, refreshToken } = useAuth();
+  const { socket, connected, connectionError, emitEvent, joinRoom, leaveRoom } = useSocket();
+  const [isTyping, setIsTyping] = useState(false);
+  // eslint-disable-next-line no-unused-vars
+  const [typingUsers, setTypingUsers] = useState({});
+  const [activeTab, setActiveTab] = useState(0);
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [openAddByPhone, setOpenAddByPhone] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [chatToDelete, setChatToDelete] = useState(null);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [notificationSettings, setNotificationSettings] = useState({
+    messageNotifications: true,
+    callNotifications: true,
+    contactStatusNotifications: false,
+    messageReadNotifications: false,
+    sound: true
+  });
+  const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [mobileView, setMobileView] = useState('list'); // 'list' or 'chat'
+  const [callModalOpen, setCallModalOpen] = useState(false);
+  const [incomingCallOpen, setIncomingCallOpen] = useState(false);
+  const [currentCall, setCurrentCall] = useState(null);
+  const [incomingCallData, setIncomingCallData] = useState(null);
+  const [ringtoneAudio, setRingtoneAudio] = useState(null);
+  const [profileAnchorEl, setProfileAnchorEl] = useState(null);
+
+  // Define showNotification function inside the component where it can access notificationSettings
+  const showNotification = (title, body, icon = null, type = 'message') => {
+    // Check if the browser supports notifications
+    if (!("Notification" in window)) {
+      console.log("This browser does not support desktop notifications");
+      return;
+    }
+
+    // Check if the user is actively using the app
+    const isDocumentVisible = !document.hidden;
+    
+    // Check notification settings
+    const shouldShowNotification = 
+      (type === 'message' && notificationSettings.messageNotifications) ||
+      (type === 'call' && notificationSettings.callNotifications) ||
+      (type === 'status' && notificationSettings.contactStatusNotifications) ||
+      (type === 'read' && notificationSettings.messageReadNotifications);
+    
+    // Only show notifications if permission is granted, document is not visible, and settings allow
+    if (Notification.permission === "granted" && !isDocumentVisible && shouldShowNotification) {
+      try {
+        const notification = new Notification(title, {
+          body: body,
+          icon: icon || '/logo192.png', // Default app icon
+          tag: 'chat-notification', // Tag to replace previous notifications
+          silent: !notificationSettings.sound // Allow sound based on settings
+        });
+        
+        // Close notification after 5 seconds
+        setTimeout(() => notification.close(), 5000);
+        
+        // Handle notification click
+        notification.onclick = function() {
+          window.focus(); // Focus the window
+          this.close();
+        };
+        
+        // Play sound if enabled
+        if (notificationSettings.sound) {
+          playNotificationSound();
+        }
+      } catch (error) {
+        console.error('Error showing notification:', error);
+      }
+    } else if (Notification.permission !== "denied" && !isDocumentVisible && shouldShowNotification) {
+      // Request permission if not already granted or denied
+      Notification.requestPermission().then(permission => {
+        if (permission === "granted") {
+          showNotification(title, body, icon, type);
+        }
+      });
+    }
+  };
+
+  // Scroll to bottom more reliably - Define this function early before it's used in other functions
+  const scrollToBottom = useCallback(() => {
+    if (messagesEndRef.current) {
+      // Force scroll to end with "auto" behavior for immediate scrolling
+      messagesEndRef.current.scrollIntoView({ 
+        behavior: "auto", 
+        block: "end"
+      });
+      console.log('Scrolled to bottom of messages');
+    } else {
+      console.warn('Messages end ref not available');
+    }
+  }, [messagesEndRef]);
+
+  // Set auth token on component mount
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      setAuthToken(token);
+    }
+  }, []);
+
+  // Request notification permission
+  useEffect(() => {
+    // Check if the browser supports notifications
+    if ('Notification' in window) {
+      // If permission is not granted or denied
+      if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+        // Request permission
+        Notification.requestPermission().then(permission => {
+          console.log('Notification permission:', permission);
+        });
+      } else {
+        console.log('Notification permission status:', Notification.permission);
+      }
+    } else {
+      console.log('This browser does not support desktop notifications');
+    }
+  }, []);
+
+  // Initial server connection check
+  useEffect(() => {
+    // Ping server to check if it's available
+    const checkServerConnection = async () => {
+      try {
+        setConnectionStatus('connecting');
+        await axios.get(`${API_BASE_URL}`);
+        setConnectionStatus('connected');
+        setApiError(null);
+      } catch (error) {
+        console.error('Server connection check failed:', error);
+        setConnectionStatus('disconnected');
+        setApiError('Cannot connect to server. Please check your connection or try again later.');
+      }
+    };
+
+    checkServerConnection();
+  }, []);
+
+  // Update connection status based on socket connection
+  useEffect(() => {
+    if (connected) {
+      setConnectionStatus('connected');
+      setApiError(null);
+    } else if (connectionError) {
+      setConnectionStatus('disconnected');
+      setApiError(connectionError);
+    }
+  }, [connected, connectionError]);
+
+  // Define fetchUsers and fetchChats before they're used in useEffects
+  const fetchUsers = useCallback(async () => {
+    try {
+      setLoading(true);
+      setApiError(null);
+      
+      console.log(`Fetching users from: ${API_BASE_URL}/api/users`);
+      const response = await axios.get(`${API_BASE_URL}/api/users`);
+      
+      if (response && response.data) {
+        console.log("Users API response:", response.data);
+        setUsers(response.data);
+        // Filter online users (excluding current user)
+        setOnlineUsers(response.data.filter(u => u.isOnline && u._id !== user.id));
+        console.log(`Successfully loaded ${response.data.length} users`);
+      } else {
+        setUsers([]);
+        setOnlineUsers([]);
+        console.warn('No user data received');
+      }
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      if (error.message === 'Network Error') {
+        setApiError('Network error: Cannot connect to server. Please check your connection.');
+        setConnectionStatus('disconnected');
+      } else {
+        setApiError('Failed to load users. Please try again later.');
+      }
+      setUsers([]);
+      setOnlineUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, setUsers, setOnlineUsers, setLoading, setApiError, setConnectionStatus]);
+
+  const fetchChats = useCallback(async () => {
+    try {
+      setLoading(true);
+      setApiError(null);
+      
+      const response = await axios.get(`${API_BASE_URL}/api/chats`);
+      
+      if (response && response.data) {
+        setChats(response.data);
+      } else {
+        setChats([]);
+        console.warn('No chat data received');
+      }
+    } catch (error) {
+      console.error('Error fetching chats:', error);
+      if (error.message === 'Network Error') {
+        setApiError('Network error: Cannot connect to server. Please check your connection.');
+        setConnectionStatus('disconnected');
+      } else {
+        setApiError('Failed to load chats. Please try again later.');
+      }
+      setChats([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [setChats, setLoading, setApiError, setConnectionStatus]);
+
+  const fetchMessages = useCallback(async (userId) => {
+    try {
+      setLoading(true);
+      setApiError(null);
+      
+      console.log(`Fetching messages for user ${userId}`);
+      const response = await axios.get(`${API_BASE_URL}/api/messages/${userId}`);
+      
+      if (response && response.data) {
+        // Sort messages to ensure newest messages are at the bottom
+        const sortedMessages = [...response.data].sort((a, b) => 
+          new Date(a.createdAt) - new Date(b.createdAt)
+        );
+        
+        console.log(`Received ${sortedMessages.length} messages`);
+        
+        // Set messages and force an immediate scroll to the bottom
+        setMessages(sortedMessages);
+        
+        // Force an immediate scroll to the bottom
+        requestAnimationFrame(() => {
+          scrollToBottom();
+          // Double-check with a small delay to ensure DOM is fully updated
+          setTimeout(() => {
+            scrollToBottom();
+          }, 50);
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+      if (error.message === 'Network Error') {
+        setConnectionStatus('disconnected');
+        setApiError('Network error: Cannot connect to server');
+      } else {
+        setApiError('Failed to load messages. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [scrollToBottom]);
+
+  // Handle socket events for real-time updates
+  useEffect(() => {
+    if (socket && connected) {
+      console.log("Setting up socket event listeners");
+      
+      // Handle incoming messages
+      const handleReceiveMessage = (messageData) => {
+        console.log("Received message via socket:", messageData);
+        
+        // Check if this is a valid message
+        if (!messageData || (!messageData._id && !messageData.tempId)) {
+          console.warn("Received invalid message data:", messageData);
+          return;
+        }
+        
+        // Create a more consistent message object
+        const formattedMessage = {
+          _id: messageData._id || messageData.tempId,
+          tempId: messageData.tempId,
+          sender: messageData.sender || messageData.senderId,
+          recipient: messageData.recipient || messageData.recipientId,
+          content: messageData.content,
+          chatId: messageData.chatId,
+          createdAt: messageData.timestamp || messageData.createdAt || new Date().toISOString(),
+          status: messageData.status || 'delivered',
+          read: messageData.read || false,
+          isSent: true
+        };
+        
+        console.log("Formatted message for display:", formattedMessage);
+        
+        // Update messages state - using the callback form of setState to ensure we're working with the latest state
+        setMessages(prevMessages => {
+          // Check if this message already exists (by _id or tempId)
+          const messageExists = prevMessages.some(m => 
+            (m._id && m._id === formattedMessage._id) || 
+            (m.tempId && m.tempId === formattedMessage.tempId)
+          );
+          
+          if (messageExists) {
+            // Replace existing message to update its status
+            return prevMessages.map(m => 
+              (m._id && m._id === formattedMessage._id) || 
+              (m.tempId && m.tempId === formattedMessage.tempId)
+                ? formattedMessage 
+                : m
+            );
+          } else {
+            // Add as a new message
+            return [...prevMessages, formattedMessage];
+          }
+        });
+        
+        // Ensure we scroll to the bottom to show the new message
+        requestAnimationFrame(() => {
+          scrollToBottom();
+          // Double-check scroll after a slight delay to ensure all rendering is complete
+          setTimeout(scrollToBottom, 100);
+        });
+        
+        // Update the chat list to show the latest message
+        // This ensures the chat shows up in the list even if it's a new conversation
+        const updateChatList = async () => {
+          try {
+            // If the message is from another user and our chat list doesn't have this chat
+            const isChatInList = chats.some(c => c._id === formattedMessage.chatId);
+            const isFromCurrentUser = formattedMessage.sender === user.id;
+            
+            // If this is from another user or it's a new chat, refresh the chat list
+            if (!isChatInList || !isFromCurrentUser) {
+              console.log("Refreshing chat list due to new message");
+              await fetchChats();
+            } else {
+              // Update the existing chat with the latest message info
+              setChats(prevChats => 
+                prevChats.map(chat => {
+                  if (chat._id === formattedMessage.chatId) {
+                    // Update the chat with latest message info
+                    return {
+                      ...chat,
+                      lastMessage: {
+                        content: formattedMessage.content,
+                        createdAt: formattedMessage.createdAt,
+                        type: 'text'
+                      },
+                      updatedAt: formattedMessage.createdAt,
+                      // Increment unread count if not current chat
+                      unreadCount: chat._id !== selectedChat?._id ? (chat.unreadCount || 0) + 1 : 0
+                    };
+                  }
+                  return chat;
+                })
+              );
+              
+              // Re-sort chats to ensure latest message is at the top
+              setChats(prevChats => 
+                [...prevChats].sort((a, b) => {
+                  const aTime = a.lastMessage?.createdAt || a.updatedAt || new Date(0).toISOString();
+                  const bTime = b.lastMessage?.createdAt || b.updatedAt || new Date(0).toISOString();
+                  return new Date(bTime) - new Date(aTime);
+                })
+              );
+            }
+          } catch (error) {
+            console.error("Error updating chat list after receiving message:", error);
+          }
+        };
+        
+        // Only show notifications for messages from other users
+        if (formattedMessage.sender !== user.id) {
+          // Update the chat list
+          updateChatList();
+          
+          // Only play sound and show notification if not the current chat or tab is not visible
+          if (formattedMessage.chatId !== selectedChat?._id || document.hidden) {
+            playNotificationSound();
+            
+            // Find sender details to use in notification
+            const sender = users.find(u => u._id === formattedMessage.sender);
+            const senderName = sender?.name || 'Someone';
+            const senderIcon = sender?.profilePicture ? getImageUrl(sender.profilePicture) : null;
+            
+            // Show notification
+            showNotification(
+              `${senderName}`, 
+              formattedMessage.content.length > 50 ? `${formattedMessage.content.substring(0, 50)}...` : formattedMessage.content,
+              senderIcon,
+              'message'
+            );
+          }
+          
+          // If this is the currently selected chat, mark as read
+          if (formattedMessage.chatId === selectedChat?._id && !document.hidden) {
+            // Emit read receipt
+            if (socket && connected) {
+              console.log("Sending read receipt for message:", formattedMessage._id);
+              emitEvent('message_read', {
+                messageId: formattedMessage._id,
+                userId: user.id
+              });
+            }
+          }
+        }
+      };
+      
+      // Handle chat refresh signal
+      const handleChatRefresh = (data) => {
+        console.log("Chat refresh signal received:", data);
+        
+        if (data && data.chatId) {
+          // Update the chat list with the latest message info
+          setChats(prevChats => 
+            prevChats.map(chat => {
+              if (chat._id === data.chatId) {
+                return {
+                  ...chat,
+                  lastMessage: {
+                    content: data.lastMessage.content,
+                    createdAt: data.lastMessage.timestamp,
+                    type: data.lastMessage.type || 'text'
+                  },
+                  updatedAt: data.lastMessage.timestamp
+                };
+              }
+              return chat;
+            })
+          );
+          
+          // Re-sort chats to ensure latest message is at the top
+          setChats(prevChats => 
+            [...prevChats].sort((a, b) => {
+              const aTime = a.lastMessage?.createdAt || a.updatedAt || new Date(0).toISOString();
+              const bTime = b.lastMessage?.createdAt || b.updatedAt || new Date(0).toISOString();
+              return new Date(bTime) - new Date(aTime);
+            })
+          );
+        }
+      };
+      
+      // Handle updated chat list
+      const handleChatListUpdated = (data) => {
+        console.log("Chat list update received:", data);
+        
+        if (data && data.chats) {
+          setChats(data.chats);
+        }
+      };
+      
+      // Handle message delivered confirmation
+      const handleMessageDelivered = (status) => {
+        console.log("Message delivery status received:", status);
+        
+        if (status && status.tempId) {
+          setMessages(prevMessages => 
+            prevMessages.map(msg => 
+              msg.tempId === status.tempId ? 
+                { 
+                  ...msg, 
+                  status: status.status,
+                  _id: status.messageId || msg._id,
+                  createdAt: status.timestamp || msg.createdAt,
+                  isSent: true 
+                } : msg
+            )
+          );
+          
+          // Also refresh chat list to show updated last message
+          fetchChats();
+        }
+      };
+      
+      // Handle message read status update
+      const handleMessageStatus = (status) => {
+        console.log('Message status update:', status);
+        
+        if (status && status.messageId) {
+          // Update the status of the specific message
+          setMessages(prevMessages => 
+            prevMessages.map(msg => 
+              msg._id === status.messageId || msg.tempId === status.messageId
+                ? { ...msg, status: status.status, read: status.status === 'read', readAt: status.status === 'read' ? new Date().toISOString() : msg.readAt }
+                : msg
+            )
+          );
+          
+          // Show notification when message is read
+          if (status.status === 'read' && !document.hasFocus()) {
+            const recipient = users.find(u => u._id === status.readerId);
+            if (recipient) {
+              showNotification(
+                'Message Read',
+                `${recipient.name} has read your message`,
+                recipient.profilePicture ? getImageUrl(recipient.profilePicture) : null,
+                'read'
+              );
+            }
+          }
+        }
+      };
+      
+      // Handle typing status updates
+      const handleTypingStatus = (data) => {
+        console.log("Typing status update:", data);
+        
+        if (data && data.chatId) {
+          // Update the typing users for this chat
+          setTypingUsers(prev => ({
+            ...prev,
+            [data.chatId]: data.users || []
+          }));
+        }
+      };
+      
+      // Handle user online status updates
+      const handleUserStatus = (data) => {
+        if (data && data.userId) {
+          console.log('User status update:', data);
+          
+          // Update users with online status
+          setUsers(prevUsers => 
+            prevUsers.map(user => 
+              user._id === data.userId 
+                ? { ...user, isOnline: data.isOnline } 
+                : user
+            )
+          );
+          
+          // Update online users list
+          if (data.isOnline) {
+            setOnlineUsers(prev => {
+              // Only add if not already in list
+              if (!prev.some(u => u._id === data.userId) && data.userId !== user.id) {
+                // Find the user details
+                const userDetails = users.find(u => u._id === data.userId);
+                if (userDetails) {
+                  // Show notification for important contacts
+                  const isChatPartner = chats.some(chat => 
+                    chat.user && chat.user._id === data.userId);
+                    
+                  if (isChatPartner) {
+                    showNotification(
+                      'Contact Online',
+                      `${userDetails.name} is now online`,
+                      userDetails.profilePicture ? getImageUrl(userDetails.profilePicture) : null,
+                      'status'
+                    );
+                  }
+                  return [...prev, userDetails];
+                }
+              }
+              return prev;
+            });
+          } else {
+            setOnlineUsers(prev => {
+              // Find the user that went offline
+              const userGoingOffline = prev.find(u => u._id === data.userId);
+              
+              // Filter out the user who went offline
+              const newList = prev.filter(u => u._id !== data.userId);
+              
+              // Notify about important contacts going offline
+              if (userGoingOffline) {
+                const isChatPartner = chats.some(chat => 
+                  chat.user && chat.user._id === data.userId);
+                
+                if (isChatPartner) {
+                  showNotification(
+                    'Contact Offline',
+                    `${userGoingOffline.name} has gone offline`,
+                    userGoingOffline.profilePicture ? getImageUrl(userGoingOffline.profilePicture) : null,
+                    'status'
+                  );
+                }
+              }
+              
+              return newList;
+            });
+          }
+        }
+      };
+      
+      // Register event listeners
+      socket.on('receive_message', handleReceiveMessage);
+      socket.on('message_delivered', handleMessageDelivered);
+      socket.on('message_status', handleMessageStatus);
+      socket.on('typing_status', handleTypingStatus);
+      socket.on('user_status', handleUserStatus);
+      socket.on('chat_refresh', handleChatRefresh);
+      socket.on('chat_list_updated', handleChatListUpdated);
+      socket.on('message_error', (error) => console.error("Socket message error:", error));
+      
+      // Request a chat list refresh when initially connecting
+      if (user && user.id) {
+        emitEvent('request_chat_refresh', user.id);
+      }
+      
+      // Cleanup function to remove listeners
+      return () => {
+        socket.off('receive_message', handleReceiveMessage);
+        socket.off('message_delivered', handleMessageDelivered);
+        socket.off('message_status', handleMessageStatus);
+        socket.off('typing_status', handleTypingStatus);
+        socket.off('user_status', handleUserStatus);
+        socket.off('chat_refresh', handleChatRefresh);
+        socket.off('chat_list_updated', handleChatListUpdated);
+        socket.off('message_error');
+      };
+    }
+  }, [socket, connected, messages, selectedChat, selectedUser, user, emitEvent, scrollToBottom, playNotificationSound, setChats, fetchChats]);
+
+  // Fetch initial data
+  useEffect(() => {
+    if (user && connectionStatus === 'connected') {
+      console.log("Fetching initial data - users and chats");
+      fetchUsers();
+      fetchChats();
+    }
+  }, [user, connectionStatus, fetchUsers, fetchChats]);
+
+  // Debug effect to log users state
+  useEffect(() => {
+    console.log("Users state updated:", {
+      usersCount: users.length, 
+      users: users.map(u => ({id: u._id, name: u.name}))
+    });
+    console.log("Users state filtered (excluding current user):", 
+      users.filter(u => u._id !== user?.id).map(u => ({id: u._id, name: u.name}))
+    );
+  }, [users, user?.id]);
+
+  // Fetch messages when user is selected
+  useEffect(() => {
+    if (selectedUser && connectionStatus === 'connected') {
+      fetchMessages(selectedUser._id);
+    }
+  }, [selectedUser, connectionStatus, fetchMessages]);
+
+  // Join/leave chat room when chat changes
+  useEffect(() => {
+    if (socket && connected && selectedChat && selectedChat._id) {
+      console.log('Joining chat room:', selectedChat._id);
+      joinRoom(selectedChat._id);
+      
+      // Mark all unread messages as read
+      if (selectedChat.unreadCount && selectedChat.unreadCount > 0) {
+        const unreadMessages = messages.filter(msg => 
+          msg.sender !== user.id && !msg.read
+        );
+        
+        // Send read receipts for unread messages
+        unreadMessages.forEach(msg => {
+          emitEvent('message_read', {
+            messageId: msg._id,
+            chatId: selectedChat._id,
+            readerId: user.id
+          });
+        });
+      }
+      
+      return () => {
+        // Leave the chat room when component unmounts or chat changes
+        if (selectedChat._id) {
+          leaveRoom(selectedChat._id);
+        }
+      };
+    }
+  }, [socket, connected, selectedChat, user, joinRoom, leaveRoom, emitEvent, messages]);
+
+  // Auto-scroll when messages change with better performance
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Use requestAnimationFrame for smoother scrolling
+      requestAnimationFrame(() => {
+        scrollToBottom();
+        
+        // And another scroll after a short delay to ensure rendering is complete
+        const timeoutId = setTimeout(() => {
+          scrollToBottom();
+        }, 100);
+        
+        return () => clearTimeout(timeoutId);
+      });
+    }
+  }, [messages, scrollToBottom]);
+
+  // Add new useEffect to monitor for chat updates and refresh the list
+  useEffect(() => {
+    let chatRefreshInterval;
+    
+    if (socket && connected) {
+      // Set up a heartbeat to check for new messages
+      chatRefreshInterval = setInterval(() => {
+        if (selectedChat) {
+          // Only fetch messages if a chat is selected to avoid unnecessary requests
+          fetchMessages(selectedUser?._id);
+        }
+        // Always refresh the chats list for latest updates
+        fetchChats();
+      }, 30000); // Every 30 seconds as a fallback
+    }
+    
+    return () => {
+      if (chatRefreshInterval) {
+        clearInterval(chatRefreshInterval);
+      }
+    };
+  }, [socket, connected, selectedChat, selectedUser, fetchChats, fetchMessages]);
+
+  // Handle call-related socket events
+  useEffect(() => {
+    if (socket && connected && user) {
+      // Handler for incoming calls
+      const handleIncomingCall = (data) => {
+        console.log('Incoming call from:', data.from, data);
+        
+        // Create caller object
+        const caller = {
+          _id: data.from,
+          name: data.callerName,
+          profilePicture: data.callerPicture,
+        };
+        
+        // Update state for incoming call
+        setIncomingCallData({
+          caller,
+          callType: data.callType
+        });
+        
+        // Show the incoming call alert
+        setIncomingCallOpen(true);
+        
+        // Play ringtone
+        if (!ringtoneAudio) {
+          const audio = new Audio('/sounds/ringtone.mp3');
+          audio.loop = true;
+          audio.play().catch(err => console.error('Failed to play ringtone:', err));
+          setRingtoneAudio(audio);
+        }
+        
+        // Show notification for incoming call
+        showNotification(
+          'Incoming Call',
+          `${data.callerName || 'Someone'} is calling you`,
+          data.callerPicture ? getImageUrl(data.callerPicture) : null,
+          'call'
+        );
+      };
+      
+      // Handler for call rejection
+      const handleCallRejected = (data) => {
+        console.log('Call rejected by:', data.from);
+        
+        // Stop ringtone if playing
+        if (ringtoneAudio) {
+          ringtoneAudio.pause();
+          ringtoneAudio.currentTime = 0;
+          setRingtoneAudio(null);
+        }
+        
+        // Close modal if open
+        setCallModalOpen(false);
+        setCurrentCall(null);
+        
+        // Show notification
+        toast.info(`${data.from === selectedChat?.user?.name ? selectedChat?.user?.name : 'User'} rejected the call`);
+      };
+      
+      // Handler for call ended
+      const handleCallEnded = (data) => {
+        console.log('Call ended by:', data.from);
+        
+        // Stop ringtone if playing
+        if (ringtoneAudio) {
+          ringtoneAudio.pause();
+          ringtoneAudio.currentTime = 0;
+          setRingtoneAudio(null);
+        }
+        
+        // Cleanup media stream
+        if (window.localStream) {
+          console.log('Cleaning up local stream after call ended');
+          window.localStream.getTracks().forEach(track => track.stop());
+          window.localStream = null;
+        }
+        
+        // Close modals
+        setCallModalOpen(false);
+        setIncomingCallOpen(false);
+        setCurrentCall(null);
+        setIncomingCallData(null);
+        
+        // Show notification
+        toast.info('Call ended');
+      };
+      
+      // Register socket event listeners for call-related events
+      socket.on('incoming_call', handleIncomingCall);
+      socket.on('call_rejected', handleCallRejected);
+      socket.on('call_ended', handleCallEnded);
+      
+      // Cleanup function
+      return () => {
+        // Remove socket event listeners
+        socket.off('incoming_call', handleIncomingCall);
+        socket.off('call_rejected', handleCallRejected);
+        socket.off('call_ended', handleCallEnded);
+        
+        // Stop ringtone if playing
+        if (ringtoneAudio) {
+          ringtoneAudio.pause();
+          ringtoneAudio.currentTime = 0;
+        }
+        
+        // Cleanup media stream
+        if (window.localStream) {
+          window.localStream.getTracks().forEach(track => track.stop());
+          window.localStream = null;
+        }
+      };
+    }
+  }, [socket, connected, user, selectedChat, ringtoneAudio]);
+  
+  // Update the function to handle accepting calls 
+  const callAcceptHandler = (video = false) => {
+    // Hide incoming call alert
+    setIncomingCallOpen(false);
+    
+    // Stop ringtone
+    if (ringtoneAudio) {
+      ringtoneAudio.pause();
+      ringtoneAudio.currentTime = 0;
+      setRingtoneAudio(null);
+    }
+    
+    if (!incomingCallData || !incomingCallData.caller) {
+      console.error('Missing caller information');
+      return;
+    }
+    
+    // Emit call accepted event
+    emitEvent('call_accepted', {
+      to: incomingCallData.caller._id,
+      from: user.id
+    });
+    
+    // Show call modal
+    setCurrentCall({
+      caller: incomingCallData.caller,
+      callType: video ? 'video' : incomingCallData.callType || 'audio'
+    });
+    
+    setCallModalOpen(true);
+  };
+  
+  // Update the function to handle rejecting calls
+  const callRejectHandler = () => {
+    console.log('Rejecting incoming call');
+    
+    // Stop ringtone if playing
+    if (ringtoneAudio) {
+      ringtoneAudio.pause();
+      ringtoneAudio.currentTime = 0;
+      setRingtoneAudio(null);
+    }
+    
+    // Emit call rejected event
+    if (incomingCallData && incomingCallData.caller) {
+      emitEvent('call_rejected', {
+        to: incomingCallData.caller._id,
+        from: user.id
+      });
+    }
+    
+    // Cleanup media stream if exists
+    if (window.localStream) {
+      console.log('Cleaning up local stream after call rejection');
+      window.localStream.getTracks().forEach(track => {
+        console.log(`Stopping ${track.kind} track`);
+        track.stop();
+      });
+      window.localStream = null;
+    }
+    
+    // Close the incoming call alert
+    setIncomingCallOpen(false);
+    setIncomingCallData(null);
+  };
+  
+  // Update the function to handle initiating calls
+  const handleCall = (callType = 'audio') => {
+    if (!selectedChat) return;
+    
+    // Set up call data
+    setCurrentCall({
+      remoteUser: selectedChat.user,
+      isIncoming: false,
+      callType
+    });
+    
+    // Show call modal
+    setCallModalOpen(true);
+    
+    // Emit call initiation event
+    emitEvent('initiate_call', {
+      to: selectedChat.user._id,
+      from: user.id,
+      callerName: user.name,
+      callerPicture: user.profilePicture,
+      callType
+    });
+  };
+
+  // Handle iOS keyboard appearance pushing content up
+  useEffect(() => {
+    if (isMobile) {
+      // Function to handle when the virtual keyboard appears
+      const handleResize = () => {
+        // Small timeout to ensure the keyboard is fully shown
+        setTimeout(() => {
+          // Force scroll to the latest message
+          scrollToBottom();
+        }, 300);
+      };
+
+      window.addEventListener('resize', handleResize);
+      return () => {
+        window.removeEventListener('resize', handleResize);
+      };
+    }
+  }, [isMobile, scrollToBottom]);
+
+  const retryConnection = () => {
+    setApiError(null);
+    window.location.reload();
+  };
+
+  // Handle sending a new message
+  const handleSendMessage = async (event) => {
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+    
+    // Trim the message to remove whitespace
+    const trimmedMessage = newMessage.trim();
+    console.log("Attempting to send message:", {
+      trimmedMessage,
+      selectedUser: selectedUser?.name,
+      connected,
+      selectedRecipientId: selectedUser?._id
+    });
+    
+    // First check if we can actually send a message
+    if (!trimmedMessage) {
+      console.log("Message is empty, not sending");
+      return;
+    }
+    
+    if (!selectedUser || !selectedUser._id) {
+      console.log("No recipient selected, cannot send message");
+      return;
+    }
+    
+    if (!selectedChat) {
+      console.log("No active chat selected");
+    }
+
+    // Make sure we have a valid token
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setApiError("Authentication token missing. Please login again.");
+      console.error("No auth token found for message sending");
+      return;
+    }
+    
+    // Generate a temporary ID for this message
+    const tempId = `temp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    // Create a temporary message to display immediately
+    const tempMessage = {
+      _id: tempId,
+      sender: user.id,
+      recipient: selectedUser._id,
+      content: trimmedMessage,
+      read: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      status: 'sending',
+      tempId,
+      isSent: false,
+      chatId: selectedChat?._id
+    };
+    
+    // Add to messages immediately for instant UI feedback
+    setMessages(prevMessages => [...prevMessages, tempMessage]);
+    
+    // Clear the input field and reset typing state
+    setNewMessage('');
+    setIsTyping(false);
+    
+    // Scroll to bottom to show new message immediately
+    requestAnimationFrame(() => {
+      scrollToBottom();
+    });
+
+    // If we already have a local socket connection, try to send in real-time first
+    let socketSent = false;
+    if (socket && connected) {
+      try {
+        // Prepare message data for socket
+        const messageData = {
+          tempId,
+          senderId: user.id,
+          recipientId: selectedUser._id,
+          content: trimmedMessage,
+          chatId: selectedChat?._id,
+          timestamp: new Date().toISOString(),
+          type: 'text'
+        };
+        
+        console.log("Emitting message via socket:", messageData);
+        
+        // Emit the message event through socket
+        socketSent = emitEvent('send_message', messageData);
+        
+        if (socketSent) {
+          console.log("Message sent successfully via socket");
+          
+          // Update the chat in our list with the latest message
+          // This ensures the chat UI updates even if the HTTP request is slow
+          updateLocalChatWithMessage(selectedChat?._id, trimmedMessage);
+        }
+      } catch (socketError) {
+        console.error("Error sending message via socket:", socketError);
+        socketSent = false;
+      }
+    }
+    
+    // Always send via HTTP API to ensure storage (even if socket works)
+    try {
+      // Ensure auth token is set in headers
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      console.log("Sending message via API to:", `${API_BASE_URL}/api/messages`);
+      console.log("Message data:", {
+        recipient: selectedUser._id,
+        content: trimmedMessage,
+        chatId: selectedChat?._id
+      });
+      
+      const response = await axios.post(`${API_BASE_URL}/api/messages`, {
+        recipient: selectedUser._id,
+        content: trimmedMessage,
+        chatId: selectedChat?._id,
+        tempId // Pass tempId to allow matching on server
+      }, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.data) {
+        console.log("API response for message:", response.data);
+        
+        // Replace the temporary message with the real one from the server
+        setMessages(prevMessages => 
+          prevMessages.map(msg => 
+            msg._id === tempId || msg.tempId === tempId 
+              ? {...response.data, status: 'sent', isSent: true} 
+              : msg
+          )
+        );
+        
+        // If the message created a new chat, update selectedChat
+        if (response.data.chatId && (!selectedChat || !selectedChat._id)) {
+          console.log("New chat created:", response.data.chatId);
+          // Fetch the chat details to update UI
+          fetchChats();
+        } else if (!socketSent) {
+          // If socket didn't send, update the chat list to show the latest message
+          updateLocalChatWithMessage(response.data.chatId || selectedChat?._id, trimmedMessage);
+        }
+        
+        // Clear any previous errors
+        setApiError(null);
+      } else {
+        // Mark the message as failed if no data returned
+        console.error("No data returned from server for message");
+        setMessages(prevMessages => 
+          prevMessages.map(msg => 
+            msg._id === tempId || msg.tempId === tempId
+              ? {...msg, status: 'failed'} 
+              : msg
+          )
+        );
+        setApiError("Failed to send message: Server returned empty response");
+      }
+    } catch (error) {
+      console.error("Error sending message:", error);
+      console.error("Error details:", error.response?.data);
+      
+      // Mark the message as failed
+      setMessages(prevMessages => 
+        prevMessages.map(msg => 
+          msg._id === tempId || msg.tempId === tempId
+            ? {...msg, status: 'failed'} 
+            : msg
+        )
+      );
+      
+      // Show detailed error in UI
+      if (error.message === 'Network Error') {
+        setConnectionStatus('disconnected');
+        setApiError('Network error: Cannot connect to server. Please check your connection.');
+      } else if (error.response?.status === 401) {
+        setApiError('Authentication failed. Please login again.');
+        // Try to refresh token
+        refreshToken().catch(() => {
+          logout(); // Force logout if token refresh fails
+        });
+      } else {
+        setApiError(error.response?.data?.msg || "Failed to send message. Please try again.");
+      }
+    }
+  };
+
+  // Helper function to update the local chat list with a new message
+  const updateLocalChatWithMessage = (chatId, content) => {
+    if (!chatId) return;
+    
+    const now = new Date().toISOString();
+    
+    // Update chat list to show the latest message
+    setChats(prevChats => {
+      // Check if this chat exists in our list
+      const chatExists = prevChats.some(c => c._id === chatId);
+      
+      if (chatExists) {
+        // Update existing chat
+        const updatedChats = prevChats.map(chat => 
+          chat._id === chatId 
+            ? {
+                ...chat,
+                lastMessage: {
+                  content,
+                  createdAt: now,
+                  type: 'text'
+                },
+                updatedAt: now
+              } 
+            : chat
+        );
+        
+        // Sort to ensure most recent is at top
+        return [...updatedChats].sort((a, b) => {
+          const aTime = a.lastMessage?.createdAt || a.updatedAt || new Date(0).toISOString();
+          const bTime = b.lastMessage?.createdAt || b.updatedAt || new Date(0).toISOString();
+          return new Date(bTime) - new Date(aTime);
+        });
+      } else {
+        // Chat doesn't exist yet in our list (new conversation)
+        // We'll refresh the whole list via fetchChats()
+        return prevChats;
+      }
+    });
+  };
+
+  /* eslint-disable no-unused-vars */
+  const handleChatSelect = (chat, user) => {
+    setSelectedChat(chat);
+    setSelectedUser(user);
+    
+    // Request most recent messages for this chat
+    if (socket && connected && chat._id) {
+      // Join the chat room
+      joinRoom(chat._id);
+      
+      // Request latest messages
+      fetchMessages(user._id);
+      
+      // Mark all unread messages as read
+      if (chat.unreadCount && chat.unreadCount > 0) {
+        // Update chat unread count in our state
+        setChats(prevChats => 
+          prevChats.map(c => 
+            c._id === chat._id ? { ...c, unreadCount: 0 } : c
+          )
+        );
+      }
+    }
+    
+    if (isMobile) {
+      setMobileView('chat');
+    }
+  };
+
+  const getLastMessagePreview = (chat) => {
+    if (!chat || !chat.lastMessage) return "No messages yet";
+    
+    const lastMessage = chat.lastMessage;
+    if (lastMessage.type === 'text') {
+      return lastMessage.content.length > 25 
+        ? lastMessage.content.substring(0, 25) + '...' 
+        : lastMessage.content;
+    } else if (lastMessage.type === 'image') {
+      return "📷 Image";
+    } else if (lastMessage.type === 'file') {
+      return "📎 File";
+    }
+    return "New message";
+  };
+
+  const handleTyping = (event) => {
+    // Check if event is defined before trying to access event.target
+    const value = event && event.target ? event.target.value : newMessage;
+    setNewMessage(value);
+    
+    // Only send typing events if we have a socket connection and selected user
+    if (socket && connected && selectedUser && selectedUser._id && selectedChat) {
+      // If not already typing and message is not empty, emit typing start
+      if (!isTyping && value.trim() !== '') {
+        setIsTyping(true);
+        emitEvent('typing', {
+          chatId: selectedChat._id,
+          userId: user.id,
+          isTyping: true
+        });
+      } 
+      // If was typing but message is now empty, emit typing stop
+      else if (isTyping && value.trim() === '') {
+        setIsTyping(false);
+        emitEvent('typing', {
+          chatId: selectedChat._id,
+          userId: user.id,
+          isTyping: false
+        });
+      }
+    }
+    
+    // Add debounce for typing stop (user has stopped typing for 1.5 seconds)
+    clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      if (isTyping && selectedChat) {
+        setIsTyping(false);
+        emitEvent('typing', {
+          chatId: selectedChat._id,
+          userId: user.id,
+          isTyping: false
+        });
+      }
+    }, 1500);
+  };
+
+  const renderMessageStatus = (message) => {
+    if (!message.sender || message.sender._id !== user.id) return null;
+    
+    if (message.status === 'read') {
+      return <DoneAllIcon fontSize="small" color="primary" sx={{ ml: 1, fontSize: '0.8rem' }} />;
+    } else if (message.status === 'delivered') {
+      return <DoneAllIcon fontSize="small" sx={{ ml: 1, fontSize: '0.8rem', color: 'grey.500' }} />;
+    } else if (message.status === 'sending') {
+      return (
+        <CircularProgress 
+          size={8} 
+          thickness={8} 
+          sx={{ ml: 1 }} 
+        />
+      );
+    } else if (message.status === 'failed') {
+      return (
+        <Tooltip title="Failed to send. Click to retry.">
+          <IconButton 
+            size="small" 
+            color="error" 
+            sx={{ ml: 1, p: 0 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleResendMessage(message);
+            }}
+          >
+            <RefreshIcon fontSize="small" sx={{ fontSize: '0.8rem' }} />
+          </IconButton>
+        </Tooltip>
+      );
+    } else {
+      return <DoneIcon fontSize="small" sx={{ ml: 1, fontSize: '0.8rem', color: 'grey.500' }} />;
+    }
+  };
+
+  const handleResendMessage = (failedMessage) => {
+    // Make sure we have a valid token
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setApiError("Authentication token missing. Please login again.");
+      console.error("No auth token found for message resending");
+      return;
+    }
+    
+    // Remove the failed message
+    setMessages(prev => prev.filter(msg => msg._id !== failedMessage._id));
+    
+    // Get the content from the failed message
+    const messageContent = failedMessage.content;
+    
+    // Create a new temporary message with a unique ID
+    const tempId = `temp-${Date.now()}`;
+    const messageId = `msg-${Date.now()}`;
+    
+    const tempMessage = {
+      _id: tempId,
+      messageId: messageId,
+      sender: user,
+      recipient: selectedUser,
+      content: messageContent,
+      createdAt: new Date().toISOString(),
+      status: 'sending',
+      isTemp: true
+    };
+    
+    // Add the temp message to the messages list
+    setMessages(prev => [...prev, tempMessage]);
+    
+    // Scroll to bottom
+    scrollToBottom();
+    
+    // Emit the socket event for real-time update
+    emitEvent('send_message', {
+      recipientId: selectedUser._id,
+      content: messageContent,
+      chatId: selectedChat?._id,
+      tempId: tempId,
+      messageId: messageId,
+      sender: {
+        _id: user.id,
+        name: user.name
+      }
+    });
+    
+    // Ensure the token is set in axios headers
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    
+    console.log("Resending message via API", {
+      recipientId: selectedUser._id,
+      content: messageContent,
+      messageId: messageId,
+      token: token ? 'Present' : 'Missing'
+    });
+    
+    // Make the API call to resend
+    axios.post(`${API_BASE_URL}/api/messages`, {
+      recipient: selectedUser._id,
+      content: messageContent,
+      messageId: messageId
+    }, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    })
+    .then(response => {
+      if (response && response.data) {
+        console.log("Resent message API response:", response.data);
+        
+        // Check if this message already exists in the messages list
+        const messageExists = messages.some(msg => 
+          (msg.messageId === messageId && msg._id !== tempId) || 
+          (response.data._id && msg._id === response.data._id)
+        );
+        
+        if (messageExists) {
+          console.log('Resent message already exists in the state, skipping update');
+        } else {
+          // Replace the temp message with the real one
+          setMessages(prev => prev.map(msg => 
+            msg._id === tempId ? {...response.data, messageId} : msg
+          ));
+        }
+        
+        // Update the chat list to show the latest message
+        fetchChats();
+        
+        // Clear any previous errors
+        setApiError(null);
+      } else {
+        // Handle error
+        console.error("No data returned for resent message");
+        setMessages(prev => prev.map(msg => 
+          msg._id === tempId ? { ...msg, status: 'failed' } : msg
+        ));
+        setApiError("Failed to resend message: No response data");
+      }
+    })
+    .catch(error => {
+      console.error('Error resending message:', error);
+      console.error('Error details:', error.response?.data);
+      
+      // Mark as failed
+      setMessages(prev => prev.map(msg => 
+        msg._id === tempId ? { ...msg, status: 'failed' } : msg
+      ));
+      
+      if (error.message === 'Network Error') {
+        setApiError('Network error: Cannot connect to server. Please check your connection.');
+        setConnectionStatus('disconnected');
+      } else if (error.response?.status === 401) {
+        setApiError('Authentication failed. Please login again.');
+        // Try to refresh token
+        refreshToken().catch(() => {
+          logout(); // Force logout if token refresh fails
+        });
+      } else {
+        setApiError(error.response?.data?.msg || 'Failed to send message. Please try again.');
+      }
+    });
+  };
+
+  const handleUserSelect = useCallback((selectedUserData) => {
+    setSelectedUser(selectedUserData);
+    
+    // Find if there's an existing chat with this user
+    const existingChat = chats.find(chat => {
+      if (chat.isGroup) return false;
+      return chat.participants.some(p => p._id === selectedUserData._id);
+    });
+    
+    if (existingChat) {
+      setSelectedChat(existingChat);
+    } else {
+      setSelectedChat(null);
+    }
+    
+    setActiveTab(0); // Switch back to Chats tab
+  }, [chats]);
+
+  const createNewChat = useCallback(async (selectedUserData) => {
+    try {
+      setLoading(true);
+      setApiError(null);
+      
+      // Create a new chat with the selected user
+      const response = await axios.post(`${API_BASE_URL}/api/chats`, {
+        participants: [selectedUserData._id],
+        isGroup: false
+      });
+      
+      if (response && response.data) {
+        // Add the new chat to the list
+        setChats(prev => [response.data, ...prev]);
+        
+        // Select the new chat
+        setSelectedChat(response.data);
+        setSelectedUser(selectedUserData);
+      }
+    } catch (error) {
+      console.error('Error creating new chat:', error);
+      setApiError('Failed to create chat. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [setLoading, setApiError, setChats, setSelectedChat, setSelectedUser]);
+
+  const handleAddUserByPhone = (foundUser) => {
+    if (foundUser) {
+      // Check if we already have a chat with this user
+      const existingChat = chats.find(chat => {
+        if (chat.isGroup) return false;
+        return chat.participants.some(p => p._id === foundUser._id);
+      });
+      
+      if (existingChat) {
+        handleUserSelect(foundUser);
+      } else {
+        createNewChat(foundUser);
+      }
+    }
+  };
+
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
+
+  // Handle chat deletion
+  const handleDeleteChat = async () => {
+    if (!chatToDelete) return;
+    
+    try {
+      setLoading(true);
+      console.log('Attempting to delete chat with ID:', chatToDelete._id);
+      
+      // Try to refresh token before deleting
+      try {
+        await refreshToken();
+        console.log("Token refreshed before delete operation");
+      } catch (refreshError) {
+        console.error("Token refresh failed:", refreshError);
+        // Continue with existing token if refresh fails
+      }
+      
+      // Call API to delete the chat
+      const response = await axios.delete(`${API_BASE_URL}/api/chats/${chatToDelete._id}`);
+      
+      console.log('Delete response:', response.data);
+      
+      // Only proceed if we got a successful response
+      if (response && response.status === 200) {
+        // If the deleted chat is currently selected, clear the selection
+        if (selectedChat && selectedChat._id === chatToDelete._id) {
+          setSelectedChat(null);
+          setSelectedUser(null);
+          setMessages([]);
+        }
+        
+        // Remove the chat from the list
+        setChats(prevChats => prevChats.filter(chat => chat._id !== chatToDelete._id));
+        
+        // Clear any previous errors
+        setApiError(null);
+      } else {
+        throw new Error('Server returned an unsuccessful status code');
+      }
+    } catch (error) {
+      console.error('Error deleting chat:', error);
+      let errorMessage = 'Failed to delete chat. Please try again later.';
+      
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        console.error('Server error response:', error.response.data);
+        console.error('Status code:', error.response.status);
+        
+        if (error.response.status === 401) {
+          // Try to refresh token one more time with forced re-login
+          try {
+            await refreshToken();
+            // If token refresh succeeds, try the delete operation again
+            handleDeleteChat();
+            return;
+          } catch (refreshError) {
+            // Token refresh failed, need to log in again
+            errorMessage = 'Your session has expired. Please log in again.';
+            logout(); // Force logout if we can't refresh the token
+          }
+        } else {
+          errorMessage = error.response.data.msg || errorMessage;
+        }
+      } else if (error.request) {
+        // The request was made but no response was received
+        console.error('No response received:', error.request);
+        errorMessage = 'No response from server. Check your connection.';
+      }
+      
+      setApiError(errorMessage);
+    } finally {
+      setLoading(false);
+      // Always close the dialog regardless of success/failure
+      setDeleteDialogOpen(false);
+      setChatToDelete(null);
+    }
+  };
+
+  // Open delete confirmation dialog
+  const openDeleteDialog = (event, chat) => {
+    // Stop event propagation to prevent selecting the chat
+    event.stopPropagation();
+    
+    setChatToDelete(chat);
+    setDeleteDialogOpen(true);
+  };
+
+  // Close delete confirmation dialog
+  const closeDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setChatToDelete(null);
+  };
+
+  // Function to go back to the chat list on mobile
+  const handleBackToList = () => {
+    if (isMobile) {
+      setMobileView('list');
+    }
+  };
+
+  const handleInitiateCall = (recipientUser, callType = 'video') => {
+    // Set call data
+    setCurrentCall({
+      recipient: recipientUser,
+      callType
+    });
+    
+    // Show call modal
+    setCallModalOpen(true);
+    
+    // Emit call initiation event
+    emitEvent('initiate_call', {
+      to: recipientUser._id,
+      from: user.id,
+      callerName: user.name,
+      callerPicture: user.profilePicture,
+      callType
+    });
+  };
+
+  const handleCallEnd = () => {
+    // Close call modal
+    setCallModalOpen(false);
+    
+    // Cleanup any media streams
+    if (window.localStream) {
+      console.log("Cleaning up media streams after call ended");
+      window.localStream.getTracks().forEach(track => {
+        track.stop();
+      });
+      window.localStream = null;
+    }
+    
+    // Clear call data
+    setCurrentCall(null);
+  };
+
+  // Handle notification settings change
+  const handleNotificationSettingChange = (setting) => (event) => {
+    setNotificationSettings(prev => ({
+      ...prev,
+      [setting]: event.target.checked
+    }));
+    
+    // Save settings to localStorage for persistence
+    localStorage.setItem('notificationSettings', JSON.stringify({
+      ...notificationSettings,
+      [setting]: event.target.checked
+    }));
+  };
+  
+  // Load notification settings from localStorage on component mount
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('notificationSettings');
+    if (savedSettings) {
+      try {
+        const parsedSettings = JSON.parse(savedSettings);
+        setNotificationSettings(parsedSettings);
+      } catch (error) {
+        console.error('Error parsing notification settings:', error);
+      }
+    }
+  }, []);
+
+  // If connection is down, show connection error
+  if (connectionStatus === 'disconnected') {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', gap: 2 }}>
+        <Typography variant="h5" color="error">Server Connection Error</Typography>
+        <Typography>Cannot connect to the chat server. Please check your internet connection and try again.</Typography>
+        <Button 
+          variant="contained" 
+          color="primary" 
+          startIcon={<RefreshIcon />}
+          onClick={retryConnection}
+        >
+          Retry Connection
+        </Button>
+      </Box>
+    );
+  }
+
+  // If connecting, show loading
+  if (connectionStatus === 'connecting') {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <Typography>Connecting to server...</Typography>
+      </Box>
+    );
+  }
+
+  // If user is not defined or loading, show loading
+  if (!user) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <Typography>Loading user data...</Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <div className="h-screen w-full overflow-hidden flex flex-col bg-gray-100">
+      <Box sx={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {/* App Header */}
+        <AppBar 
+          position={isMobile ? "fixed" : "static"} 
+          color="primary"
+          sx={isMobile ? { zIndex: 1200 } : {}}
+        >
+          <Toolbar>
+            {isMobile && mobileView === 'chat' && (
+              <IconButton 
+                edge="start" 
+                color="inherit" 
+                onClick={handleBackToList}
+                sx={{ mr: 2 }}
+              >
+                <ArrowBackIcon />
+              </IconButton>
+            )}
+            <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+              {isMobile && mobileView === 'chat' && selectedUser 
+                ? selectedUser.name 
+                : 'Chat App'}
+            </Typography>
+            {isMobile && mobileView === 'chat' && selectedUser && (
+              <Box sx={{ display: 'flex', mr: 2 }}>
+                <IconButton 
+                  color="inherit" 
+                  onClick={() => handleInitiateCall(selectedUser, 'audio')}
+                  disabled={!selectedUser.isOnline}
+                >
+                  <CallIcon />
+                </IconButton>
+                <IconButton 
+                  color="inherit" 
+                  onClick={() => handleInitiateCall(selectedUser, 'video')}
+                  disabled={!selectedUser.isOnline}
+                  aria-label="Start video call"
+                >
+                  <VideocamIcon />
+                </IconButton>
+              </Box>
+            )}
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              {user && (
+                <>
+                  {!isMobile && (
+                    <Typography variant="body2" sx={{ mr: 2 }}>
+                      Hello, {user.name}
+                    </Typography>
+                  )}
+                  <Tooltip 
+                    title={
+                      <Box sx={{ p: 0.5 }}>
+                        <Typography variant="subtitle2">{user.name}</Typography>
+                        <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                          {user.status || 'Available'}
+                        </Typography>
+                      </Box>
+                    }
+                  >
+                    <IconButton 
+                      onClick={(e) => setProfileAnchorEl(e.currentTarget)} 
+                      color="inherit"
+                      sx={{ 
+                        p: isMobile ? 0.25 : 0.5,
+                        mr: isMobile ? 0.5 : 0
+                      }}
+                      aria-label="Profile menu"
+                    >
+                      <Badge
+                        overlap="circular"
+                        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                        variant="dot"
+                        color={user.isOnline ? "success" : "default"}
+                        sx={{
+                          '& .MuiBadge-badge': {
+                            width: 10,
+                            height: 10,
+                            borderRadius: '50%',
+                            border: '2px solid',
+                            borderColor: 'background.paper',
+                            ...(user.isOnline && {
+                              animation: `${pulseAnimation} 2s infinite`,
+                            })
+                          }
+                        }}
+                      >
+                        <Avatar 
+                          src={user.profilePicture ? getImageUrl(user.profilePicture) : ''}
+                          alt={user.name || 'User'}
+                          imgProps={{
+                            onError: (e) => {
+                              console.log('Profile image failed to load:', e.target.src);
+                              e.target.onerror = null; // Prevent infinite loop
+                              e.target.style.display = 'none'; // Hide the broken image
+                            },
+                            style: { objectFit: 'cover' }
+                          }}
+                          sx={{ 
+                            width: isMobile ? 36 : 40, 
+                            height: isMobile ? 36 : 40,
+                            border: '2px solid',
+                            borderColor: user.isOnline ? 'success.main' : 'secondary.main',
+                            bgcolor: !user.profilePicture ? 
+                              `rgb(${Math.floor(Math.random() * 150)}, ${Math.floor(Math.random() * 150)}, ${Math.floor(Math.random() * 150)})` : 
+                              'primary.main',
+                            transition: 'all 0.2s ease-in-out',
+                            '&:hover': {
+                              transform: isMobile ? 'none' : 'scale(1.1)',
+                              boxShadow: isMobile ? 'none' : '0 0 8px rgba(255,255,255,0.5)',
+                              borderColor: user.isOnline ? 'success.light' : 'secondary.light',
+                            },
+                            fontSize: isMobile ? '1rem' : '1.2rem',
+                            fontWeight: 'bold',
+                            overflow: 'hidden'
+                          }}
+                        >
+                          {user.name?.charAt(0).toUpperCase() || 'U'}
+                        </Avatar>
+                      </Badge>
+                    </IconButton>
+                  </Tooltip>
+                  {/* Profile Menu */}
+                  <Menu
+                    anchorEl={profileAnchorEl}
+                    open={Boolean(profileAnchorEl)}
+                    onClose={() => setProfileAnchorEl(null)}
+                    PaperProps={{
+                      sx: { 
+                        mt: 1.5,
+                        minWidth: 180,
+                        borderRadius: 2,
+                        boxShadow: 3
+                      }
+                    }}
+                  >
+                    <MenuItem onClick={() => {
+                      setProfileAnchorEl(null);
+                      setProfileMenuOpen(true);
+                    }}>
+                      <PersonIcon fontSize="small" sx={{ mr: 1.5 }} />
+                      Edit Profile
+                    </MenuItem>
+                    
+                    <MenuItem onClick={() => {
+                      setProfileAnchorEl(null);
+                      setNotificationSettingsOpen(true);
+                    }}>
+                      <NotificationsIcon fontSize="small" sx={{ mr: 1.5 }} />
+                      Notification Settings
+                    </MenuItem>
+                    
+                    <Divider />
+                    <MenuItem 
+                      onClick={() => {
+                        logout();
+                        setProfileAnchorEl(null);
+                      }}
+                      sx={{ py: 1, color: 'error.main' }}
+                    >
+                      Logout
+                    </MenuItem>
+                  </Menu>
+                  
+                  {/* Notification Settings Dialog */}
+                  <Dialog
+                    open={notificationSettingsOpen}
+                    onClose={() => setNotificationSettingsOpen(false)}
+                    maxWidth="sm"
+                    fullWidth
+                  >
+                    <DialogTitle>Notification Settings</DialogTitle>
+                    <DialogContent>
+                      <FormGroup>
+                        <FormControlLabel
+                          control={
+                            <Switch 
+                              checked={notificationSettings.messageNotifications}
+                              onChange={handleNotificationSettingChange('messageNotifications')}
+                              color="primary"
+                            />
+                          }
+                          label="Message Notifications"
+                        />
+                        <Typography variant="caption" color="text.secondary" sx={{ ml: 3, mb: 2 }}>
+                          Receive notifications when new messages arrive
+                        </Typography>
+                        
+                        <FormControlLabel
+                          control={
+                            <Switch 
+                              checked={notificationSettings.callNotifications}
+                              onChange={handleNotificationSettingChange('callNotifications')}
+                              color="primary"
+                            />
+                          }
+                          label="Call Notifications"
+                        />
+                        <Typography variant="caption" color="text.secondary" sx={{ ml: 3, mb: 2 }}>
+                          Receive notifications for incoming calls
+                        </Typography>
+                        
+                        <FormControlLabel
+                          control={
+                            <Switch 
+                              checked={notificationSettings.contactStatusNotifications}
+                              onChange={handleNotificationSettingChange('contactStatusNotifications')}
+                              color="primary"
+                            />
+                          }
+                          label="Contact Status Notifications"
+                        />
+                        <Typography variant="caption" color="text.secondary" sx={{ ml: 3, mb: 2 }}>
+                          Receive notifications when contacts come online or go offline
+                        </Typography>
+                        
+                        <FormControlLabel
+                          control={
+                            <Switch 
+                              checked={notificationSettings.messageReadNotifications}
+                              onChange={handleNotificationSettingChange('messageReadNotifications')}
+                              color="primary"
+                            />
+                          }
+                          label="Read Receipt Notifications"
+                        />
+                        <Typography variant="caption" color="text.secondary" sx={{ ml: 3, mb: 2 }}>
+                          Receive notifications when your messages are read
+                        </Typography>
+                        
+                        <FormControlLabel
+                          control={
+                            <Switch 
+                              checked={notificationSettings.sound}
+                              onChange={handleNotificationSettingChange('sound')}
+                              color="primary"
+                            />
+                          }
+                          label="Notification Sounds"
+                        />
+                        <Typography variant="caption" color="text.secondary" sx={{ ml: 3, mb: 2 }}>
+                          Play sounds for notifications
+                        </Typography>
+                      </FormGroup>
+                    </DialogContent>
+                    <DialogActions>
+                      <Button onClick={() => setNotificationSettingsOpen(false)}>
+                        Close
+                      </Button>
+                    </DialogActions>
+                  </Dialog>
+                </>
+              )}
+            </Box>
+
+            {/* Floating action button for adding users by phone on mobile */}
+            {isMobile && (
+              <Fab 
+                color="primary" 
+                aria-label="add chat"
+                onClick={() => setOpenAddByPhone(true)}
+                sx={{ 
+                  position: 'absolute', 
+                  bottom: 20, 
+                  right: 20, 
+                  zIndex: 1000 
+                }}
+              >
+                <PersonAddIcon />
+              </Fab>
+            )}
+          </Toolbar>
+        </AppBar>
+        
+        {/* Add padding when header is fixed on mobile */}
+        {isMobile && <Box sx={{ height: '64px' }} />}
+        
+        {/* Main Content */}
+        <Grid container sx={{ flexGrow: 1, overflow: 'hidden' }}>
+          {/* Left column - Chats and Users list - Hidden on mobile when viewing a chat */}
+          <Grid 
+            item 
+            xs={12} 
+            md={4} 
+            sx={{ 
+              height: '100%', 
+              borderRight: '1px solid #e0e0e0',
+              display: isMobile && mobileView === 'chat' ? 'none' : 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            {/* Tabs for switching between chats and users */}
+            <Tabs
+              value={activeTab}
+              onChange={handleTabChange}
+              variant="fullWidth"
+              indicatorColor="primary"
+              textColor="primary"
+              sx={{ borderBottom: 1, borderColor: 'divider' }}
+            >
+              <Tab label="Chats" icon={<ChatIcon />} iconPosition="start" />
+              <Tab label="Users" icon={<PersonIcon />} iconPosition="start" />
+            </Tabs>
+            
+            {/* Search input (optional) */}
+            <Box sx={{ p: 2, borderBottom: '1px solid #e0e0e0' }}>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder={activeTab === 0 ? "Search chats..." : "Search users..."}
+                variant="outlined"
+                sx={{ mb: 1 }}
+              />
+            </Box>
+            
+            {/* Content area - scrollable */}
+            <Box sx={{ flexGrow: 1, overflow: 'auto', bgcolor: 'background.paper' }}>
+              {/* Chats tab content */}
+              {activeTab === 0 && (
+                <List>
+                  {loading ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                      <CircularProgress size={30} />
+                    </Box>
+                  ) : chats.length === 0 ? (
+                    <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
+                      <Typography>No chats yet.</Typography>
+                      <Typography variant="body2">Start a conversation with a user!</Typography>
+                    </Box>
+                  ) : (
+                    chats.map(chat => {
+                      // Find the other user in the chat (assuming 1-on-1 chats)
+                      const chatUser = chat.user || chat.participants?.find(p => p._id !== user.id);
+                      const isSelected = selectedChat && selectedChat._id === chat._id;
+                      
+                      return (
+                        <ListItem
+                          key={chat._id}
+                          button
+                          selected={isSelected}
+                          onClick={() => handleChatSelect(chat, chatUser)}
+                          sx={{
+                            borderLeft: isSelected ? '4px solid' : 'none',
+                            borderColor: isSelected ? 'primary.main' : 'transparent',
+                            bgcolor: isSelected ? 'action.selected' : 'transparent',
+                            transition: 'all 0.2s',
+                            '&:hover': {
+                              bgcolor: 'action.hover',
+                            }
+                          }}
+                        >
+                          <ListItemAvatar>
+                            <Badge
+                              overlap="circular"
+                              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                              variant="dot"
+                              color={chatUser?.isOnline ? "success" : "default"}
+                            >
+                              <Avatar 
+                                src={chatUser?.profilePicture ? getImageUrl(chatUser.profilePicture) : ''}
+                                alt={chatUser?.name || 'User'}
+                              >
+                                {chatUser?.name?.charAt(0) || 'U'}
+                              </Avatar>
+                            </Badge>
+                          </ListItemAvatar>
+                          <ListItemText
+                            primary={
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Typography 
+                                  sx={{ 
+                                    fontWeight: chat.unreadCount > 0 ? 'bold' : 'normal',
+                                    color: chat.unreadCount > 0 ? 'text.primary' : 'inherit'
+                                  }}
+                                  noWrap
+                                >
+                                  {chatUser?.name || 'Unknown User'}
+                                </Typography>
+                                {chat.lastMessage?.createdAt && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    {format(chat.lastMessage.createdAt)}
+                                  </Typography>
+                                )}
+                              </Box>
+                            }
+                            secondary={
+                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                <Typography 
+                                  variant="body2" 
+                                  color="text.secondary" 
+                                  sx={{ 
+                                    maxWidth: '70%',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    fontWeight: chat.unreadCount > 0 ? 'medium' : 'normal'
+                                  }}
+                                >
+                                  {getLastMessagePreview(chat)}
+                                </Typography>
+                                {chat.unreadCount > 0 && (
+                                  <Badge 
+                                    badgeContent={chat.unreadCount} 
+                                    color="primary"
+                                    sx={{ ml: 'auto' }}
+                                  />
+                                )}
+                              </Box>
+                            }
+                          />
+                          <ListItemSecondaryAction>
+                            <IconButton 
+                              edge="end" 
+                              aria-label="delete" 
+                              onClick={(e) => openDeleteDialog(e, chat)}
+                              size="small"
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </ListItemSecondaryAction>
+                        </ListItem>
+                      );
+                    })
+                  )}
+                </List>
+              )}
+              
+              {/* Users tab content */}
+              {activeTab === 1 && (
+                <List>
+                  {loading ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                      <CircularProgress size={30} />
+                    </Box>
+                  ) : users.length === 0 ? (
+                    <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
+                      <Typography>No users found.</Typography>
+                      <Button 
+                        variant="contained" 
+                        color="primary" 
+                        onClick={() => {
+                          console.log("Manual fetchUsers triggered");
+                          fetchUsers();
+                        }}
+                        sx={{ mt: 2 }}
+                      >
+                        Refresh Users
+                      </Button>
+                    </Box>
+                  ) : (
+                    users.filter(u => u._id !== user.id).map(u => (
+                      <ListItem
+                        key={u._id}
+                        button
+                        onClick={() => handleUserSelect(u)}
+                        sx={{
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            bgcolor: 'action.hover',
+                          }
+                        }}
+                        className="transition-all duration-200 hover:bg-gray-50 border-b border-gray-100"
+                      >
+                        <ListItemAvatar>
+                          <Badge
+                            overlap="circular"
+                            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                            variant="dot"
+                            color={u.isOnline ? "success" : "default"}
+                            className="relative"
+                          >
+                            <Avatar 
+                              src={u.profilePicture ? getImageUrl(u.profilePicture) : ''}
+                              alt={u.name || 'User'}
+                              className={`h-10 w-10 ${u.isOnline ? 'ring-2 ring-success ring-offset-2' : ''}`}
+                            >
+                              {u.name?.charAt(0) || 'U'}
+                            </Avatar>
+                            <span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full ${u.isOnline ? 'bg-success-light animate-pulse-status' : 'bg-gray-400'} border-2 border-white`}></span>
+                          </Badge>
+                        </ListItemAvatar>
+                        <ListItemText
+                          primary={u.name}
+                          secondary={
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}
+                                className="flex items-center"
+                            >
+                              <Typography variant="body2" color="text.secondary"
+                                  className={`text-sm ${u.isOnline ? 'text-success' : 'text-gray-500'}`}
+                              >
+                                {u.isOnline ? 'Online' : 'Offline'}
+                              </Typography>
+                            </Box>
+                          }
+                          className="ml-2"
+                        />
+                      </ListItem>
+                    ))
+                  )}
+                </List>
+              )}
+            </Box>
+          </Grid>
+          
+          {/* Right column - Chat area - Hidden on mobile when viewing the list */}
+          <Grid 
+            item 
+            xs={12} 
+            md={8} 
+            sx={{ 
+              height: '100%', 
+              display: isMobile && mobileView === 'list' ? 'none' : 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            {/* Chat header */}
+            {selectedChat && (
+              <Box sx={{ p: 2, borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center' }}>
+                <Avatar 
+                  src={selectedUser?.profilePicture ? getImageUrl(selectedUser.profilePicture) : ''}
+                  alt={selectedUser?.name || 'User'}
+                  sx={{ mr: 2 }}
+                >
+                  {selectedUser?.name?.charAt(0) || 'U'}
+                </Avatar>
+                <Box>
+                  <Typography variant="h6">{selectedUser?.name || 'Unknown User'}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {selectedUser?.isOnline ? 'Online' : 'Offline'}
+                  </Typography>
+                </Box>
+                <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center' }}>
+                  <IconButton 
+                    onClick={() => handleInitiateCall(selectedUser, 'audio')}
+                    disabled={!selectedUser.isOnline}
+                    sx={{ mr: 1 }}
+                  >
+                    <CallIcon />
+                  </IconButton>
+                  <IconButton 
+                    onClick={() => handleInitiateCall(selectedUser, 'video')}
+                    disabled={!selectedUser.isOnline}
+                    aria-label="Start video call"
+                  >
+                    <VideocamIcon />
+                  </IconButton>
+                </Box>
+              </Box>
+            )}
+            
+            {/* Chat messages area */}
+            <Box sx={{ flexGrow: 1, overflow: 'auto', bgcolor: 'background.paper', p: 2 }}>
+              {/* Render messages here */}
+            </Box>
+            
+            {/* Chat input area */}
+            <Box sx={{ p: 2, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center' }}>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="Type a message..."
+                variant="outlined"
+                sx={{ mr: 1 }}
+              />
+              <IconButton color="primary">
+                <SendIcon />
+              </IconButton>
+            </Box>
+          </Grid>
+        </Grid>
+      </Box>
+    </div>
+  );
+};
+
+export default Chat;
+

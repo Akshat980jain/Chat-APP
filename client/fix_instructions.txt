@@ -1,0 +1,56 @@
+MANUAL FIX FOR THE DUPLICATE handleUserSelect FUNCTION IN CHAT.JS
+
+Follow these steps to fix the error:
+
+1. Open the file: client/src/components/chat/Chat.js in your code editor
+
+2. Look for the second declaration of handleUserSelect at approximately line 1453:
+
+```javascript
+const handleUserSelect = (user) => {
+  // Find if there's an existing chat with this user
+  const existingChat = chats.find(chat => 
+    chat.participants && chat.participants.some(p => p._id === user._id)
+  );
+  
+  if (existingChat) {
+    // If chat exists, use it
+    handleChatSelect(existingChat, user);
+  } else {
+    // Create a temporary chat object until a real one is created
+    const tempChat = {
+      _id: `temp_${user._id}`,
+      participants: [{ _id: user.id }, user],
+      messages: [],
+      unreadCount: 0,
+      lastMessage: null
+    };
+    
+    // Select this temporary chat
+    handleChatSelect(tempChat, user);
+  }
+  
+  // If on mobile, switch to chat view
+  if (isMobile) {
+    setMobileView('chat');
+  }
+};
+```
+
+3. Delete or comment out this entire duplicate function (lines ~1453-1475)
+
+4. Replace it with a comment:
+```javascript
+// Removed duplicate handleUserSelect function that was causing compilation error
+```
+
+5. Save the file and restart your development server with:
+```
+npm start
+```
+
+The error occurs because there are two declarations of the handleUserSelect function:
+- First at line ~1387 using useCallback
+- Second at line ~1453 as a regular function
+
+This fix keeps only the useCallback version and removes the duplicate. 

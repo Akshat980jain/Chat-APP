@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mobile Setup Guide - Chat App</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      line-height: 1.6;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+      color: #333;
+    }
+    h1 {
+      color: #1976d2;
+      border-bottom: 2px solid #f5f5f5;
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: #333;
+      margin-top: 30px;
+    }
+    .step {
+      background-color: #f9f9f9;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      border-left: 4px solid #1976d2;
+    }
+    code {
+      background-color: #f1f1f1;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+    .warning {
+      background-color: #fff3cd;
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 4px solid #ffc107;
+      margin: 20px 0;
+    }
+    .success {
+      background-color: #d4edda;
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 4px solid #28a745;
+      margin: 20px 0;
+    }
+    button {
+      background-color: #1976d2;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-top: 10px;
+    }
+    button:hover {
+      background-color: #0d47a1;
+    }
+    .test-result {
+      margin-top: 10px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Mobile Setup Guide</h1>
+  <p>Follow this guide to connect your mobile device to the Chat App running on your computer.</p>
+  
+  <div class="warning">
+    <strong>Important:</strong> Your mobile device and the computer running the server must be on the same WiFi network.
+  </div>
+  
+  <h2>Finding Your Server's IP Address</h2>
+  <div class="step">
+    <p>The server is running on a computer with one or more IP addresses:</p>
+    <div id="server-ips">
+      <p>Loading IP addresses...</p>
+    </div>
+  </div>
+  
+  <h2>Testing Connectivity</h2>
+  <div class="step">
+    <p>Click the button below to test your connection to the server:</p>
+    <button id="test-connection">Test Connection</button>
+    <div id="test-result" class="test-result"></div>
+  </div>
+  
+  <h2>Troubleshooting</h2>
+  <div class="step">
+    <h3>Common Issues</h3>
+    <ul>
+      <li>Make sure your phone and computer are on the same WiFi network</li>
+      <li>Ensure your computer's firewall allows connections on port 5000</li>
+      <li>Try disabling mobile data and only use WiFi on your phone</li>
+      <li>If your WiFi has "AP isolation" enabled, devices cannot communicate with each other</li>
+      <li>Some public WiFi networks block connections between devices</li>
+    </ul>
+  </div>
+  
+  <h2>Manual Connection</h2>
+  <div class="step">
+    <p>If the automatic testing doesn't work, you can try manually entering the app URL in your mobile browser:</p>
+    <ol>
+      <li>Make sure your phone is connected to the same WiFi as your computer</li>
+      <li>Open your mobile browser</li>
+      <li>Enter the URL: <code id="manual-url">http://[YOUR-SERVER-IP]:5000</code></li>
+    </ol>
+  </div>
+  
+  <div class="success">
+    <p>Need more help? Ask the person who set up the server for assistance.</p>
+  </div>
+  
+  <script>
+    // Try to fetch server IP addresses
+    const serverIpsDiv = document.getElementById('server-ips');
+    const testResult = document.getElementById('test-result');
+    const manualUrl = document.getElementById('manual-url');
+    
+    // Parse IP addresses from URL parameter if available
+    const urlParams = new URLSearchParams(window.location.search);
+    const ipList = urlParams.get('ips');
+    
+    if (ipList) {
+      const ips = ipList.split(',');
+      if (ips.length > 0) {
+        let ipHtml = '<ul>';
+        ips.forEach(ip => {
+          ipHtml += `<li><a href="http://${ip}:5000" target="_blank">http://${ip}:5000</a></li>`;
+        });
+        ipHtml += '</ul>';
+        serverIpsDiv.innerHTML = ipHtml;
+        
+        // Set the first IP as the manual URL
+        manualUrl.textContent = `http://${ips[0]}:5000`;
+      }
+    } else {
+      serverIpsDiv.innerHTML = '<p>No server IP addresses provided. Ask the server administrator for the correct IP.</p>';
+    }
+    
+    // Test connection button
+    document.getElementById('test-connection').addEventListener('click', async () => {
+      testResult.innerHTML = 'Testing connection...';
+      
+      // Try all possible IPs
+      const ips = ipList ? ipList.split(',') : [];
+      let connected = false;
+      
+      for (const ip of ips) {
+        try {
+          const url = `http://${ip}:5000`;
+          const response = await fetch(url, { mode: 'no-cors', timeout: 5000 });
+          
+          // If we get here, the connection attempt didn't fail
+          testResult.innerHTML = `✅ Connection to ${url} successful!`;
+          connected = true;
+          
+          // Store the working IP in local storage
+          localStorage.setItem('api_url', url);
+          
+          // Offer to navigate to the app
+          if (confirm(`Connection successful! Would you like to open the Chat App at ${url}?`)) {
+            window.location.href = url;
+          }
+          
+          break;
+        } catch (error) {
+          console.error(`Error connecting to ${ip}:`, error);
+        }
+      }
+      
+      if (!connected) {
+        testResult.innerHTML = '❌ Could not connect to any server. See troubleshooting tips below.';
+      }
+    });
+  </script>
+</body>
+</html> 

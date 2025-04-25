@@ -1,0 +1,9 @@
+// This is a placeholder for a real MP3 file
+// In a real application, this would be an actual audio file
+// Download a notification sound from sites like:
+// - https://freesound.org/
+// - https://mixkit.co/free-sound-effects/notification/
+// - https://notificationsounds.com/
+
+// For now, we'll set up the functionality assuming this file exists.
+// When implementing this app, place a real MP3 file here named message-notification.mp3 
