@@ -4,33 +4,8 @@ import { jwtDecode } from 'jwt-decode';
 
 // Remove the top-level useCallback hooks
 const detectApiUrl = () => {
-  // First check if we have a saved URL in localStorage
-  const savedApiUrl = localStorage.getItem('api_base_url');
-  if (savedApiUrl) {
-    console.log('Using saved API URL from localStorage:', savedApiUrl);
-    return savedApiUrl;
-  }
-
-  // Default fallback URL
-  const defaultUrl = 'http://localhost:5000';
-  
-  // List of possible API URLs to try
-  const possibleUrls = [
-    window.location.origin.replace(/^https/, 'http').replace(/:\d+$/, '') + ':5000', // Same origin but with port 5000
-    'http://localhost:5000',
-    'http://127.0.0.1:5000'
-  ];
-  
-  // Filter out any duplicate URLs
-  const uniqueUrls = [...new Set(possibleUrls)];
-  
-  console.log('Detecting best API URL from options:', uniqueUrls);
-  
-  // Store the first available URL for future use
-  const bestUrl = uniqueUrls[0] || defaultUrl;
-  localStorage.setItem('api_base_url', bestUrl);
-  
-  return bestUrl;
+  // Use environment variable or fallback to production URL
+  return process.env.REACT_APP_API_URL || 'https://chat-app-backend-pus1.onrender.com';
 };
 
 // Get the API URL

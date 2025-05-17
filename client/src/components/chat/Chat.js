@@ -73,8 +73,8 @@ import MessageInput from './MessageInput';
 import BackupInputField from './BackupInputField';
 import MobileNavBar from '../layout/MobileNavBar';
 
-// Modified API base URL using environment variable or localStorage
-const API_BASE_URL = localStorage.getItem('api_url') || process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// Modified API base URL using environment variable
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://chat-app-backend-pus1.onrender.com';
 console.log('API connecting to:', API_BASE_URL);
 
 // Configure axios with common settings
