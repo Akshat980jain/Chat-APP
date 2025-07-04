@@ -4,13 +4,85 @@ import { jwtDecode } from 'jwt-decode';
 
 // Remove the top-level useCallback hooks
 const detectApiUrl = () => {
-  // Use environment variable or fallback to production URL
-  return process.env.REACT_APP_API_URL || 'https://chat-app-backend-pus1.onrender.com';
+  // Check localStorage first for manually set URL
+  const storedUrl = localStorage.getItem('api_base_url');
+  if (storedUrl) {
+    console.log('Using stored API URL:', storedUrl);
+    return storedUrl;
+  }
+  
+  // Check for environment variable
+  if (process.env.REACT_APP_API_URL) {
+    console.log('Using environment API URL:', process.env.REACT_APP_API_URL);
+    return process.env.REACT_APP_API_URL;
+  }
+  
+  // Check if we're in development mode
+  if (process.env.NODE_ENV === 'development') {
+    // Try to detect local server
+    const hostname = window.location.hostname;
+    const port = window.location.port || '3000';
+    
+    // If we're on localhost, try localhost:5000 for the API
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      const localApiUrl = `http://localhost:5000`;
+      console.log('Development mode detected, using local API URL:', localApiUrl);
+      return localApiUrl;
+    }
+    
+    // If we're on a local IP, try the same IP with port 5000
+    if (hostname.match(/^192\.168\.\d+\.\d+$/)) {
+      const localApiUrl = `http://${hostname}:5000`;
+      console.log('Local IP detected, using local API URL:', localApiUrl);
+      return localApiUrl;
+    }
+  }
+  
+  // Fallback to production URL
+  const fallbackUrl = 'https://chat-app-backend-pus1.onrender.com';
+  console.log('Using fallback API URL:', fallbackUrl);
+  return fallbackUrl;
 };
 
 // Get the API URL
 const API_URL = detectApiUrl();
-console.log('Auth connecting to:', API_URL);
+
+// Add axios interceptors for debugging
+axios.interceptors.request.use(
+  (config) => {
+    console.log('Axios request:', {
+      method: config.method,
+      url: config.url,
+      data: config.data,
+      headers: config.headers
+    });
+    return config;
+  },
+  (error) => {
+    console.error('Axios request error:', error);
+    return Promise.reject(error);
+  }
+);
+
+axios.interceptors.response.use(
+  (response) => {
+    console.log('Axios response:', {
+      status: response.status,
+      statusText: response.statusText,
+      data: response.data
+    });
+    return response;
+  },
+  (error) => {
+    console.error('Axios response error:', {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data,
+      config: error.config
+    });
+    return Promise.reject(error);
+  }
+);
 
 // Create auth context
 const AuthContext = createContext();
@@ -32,38 +104,8 @@ export const setAuthToken = (token) => {
 
 // Refresh token implementation
 export const refreshToken = async () => {
-  try {
-    // Get current API URL
-    const currentApiUrl = detectApiUrl();
-    
-    // Get the refresh token from localStorage
-    const refreshToken = localStorage.getItem('refreshToken');
-    
-    if (!refreshToken) {
-      throw new Error('No refresh token available');
-    }
-    
-    // Make the refresh token request
-    const response = await axios.post(`${currentApiUrl}/api/auth/refresh`, { refreshToken });
-    
-    if (response.data && response.data.token) {
-      // Update tokens in localStorage
-      localStorage.setItem('token', response.data.token);
-      if (response.data.refreshToken) {
-        localStorage.setItem('refreshToken', response.data.refreshToken);
-      }
-      
-      // Update axios default header
-      setAuthToken(response.data.token);
-      
-      return response.data.token;
-    } else {
-      throw new Error('Failed to refresh token');
-    }
-  } catch (error) {
-    console.error('Error refreshing token:', error);
-    throw error;
-  }
+  // No refresh token logic needed, just resolve immediately
+  return;
 };
 
 // Helper to ensure profile picture URLs are correct
@@ -132,19 +174,9 @@ export const AuthProvider = ({ children }) => {
   
   // Refresh token if needed
   const refreshTokenIfNeeded = useCallback(async () => {
-    const token = localStorage.getItem('token');
-    
-    if (!token || isTokenExpired(token)) {
-      try {
-        await refreshToken();
-        return true;
-      } catch (error) {
-        console.error('Token refresh failed:', error);
-        return false;
-      }
-    }
-    return true;
-  }, [isTokenExpired]);
+    // No refresh token logic needed, just resolve immediately
+    return;
+  }, []);
 
   // Add updateUser function
   const updateUser = useCallback((userData) => {
@@ -348,15 +380,22 @@ export const AuthProvider = ({ children }) => {
       console.log('Platform:', navigator.platform);
       console.log('Is Mobile:', /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
       
+      // Prepare the request data
+      const loginData = {
+        email: email.trim(),
+        password: password
+      };
+      
+      console.log('Login data being sent:', { ...loginData, password: '[REDACTED]' });
+      console.log('Login data type:', typeof loginData);
+      console.log('Login data stringified:', JSON.stringify(loginData));
+      
       // Ensure axios is properly configured
       axios.defaults.baseURL = currentApiUrl;
       axios.defaults.headers.common['Content-Type'] = 'application/json';
       
       // Make login request with explicit URL and timeout
-      const response = await axios.post(`${currentApiUrl}/api/auth/login`, {
-        email,
-        password
-      }, {
+      const response = await axios.post(`${currentApiUrl}/api/auth/login`, loginData, {
         timeout: 15000, // Increase timeout for slow mobile connections
         headers: {
           'Accept': 'application/json',
@@ -424,21 +463,35 @@ export const AuthProvider = ({ children }) => {
     setAuthenticated(false);
   };
 
-  const register = async (userData) => {
+  const register = async (name, email, phone, password) => {
     try {
       setLoading(true);
       setError(null);
       
-      const response = await axios.post(`${API_URL}/api/auth/register`, userData);
+      // Get current API URL using detectApiUrl (for consistency with login)
+      const currentApiUrl = detectApiUrl();
       
-      if (response.data.token) {
-        localStorage.setItem('token', response.data.token);
-        
-        // Store refresh token if available
-        if (response.data.refreshToken) {
-          localStorage.setItem('refreshToken', response.data.refreshToken);
+      // Ensure all data is properly formatted
+      const userData = {
+        name: name.trim(),
+        email: email.trim(),
+        phoneNumber: phone ? phone.trim() : '',
+        password: password
+      };
+      
+      console.log('Attempting registration with data:', { ...userData, password: '[REDACTED]' });
+      console.log('Registration data type:', typeof userData);
+      console.log('Registration data stringified:', JSON.stringify(userData));
+      
+      const response = await axios.post(`${currentApiUrl}/api/auth/register`, userData, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
         }
-        
+      });
+      
+      if (response.data && response.data.token) {
+        localStorage.setItem('token', response.data.token);
         setAuthToken(response.data.token);
         setUser(formatUserData(response.data.user));
         setAuthenticated(true);

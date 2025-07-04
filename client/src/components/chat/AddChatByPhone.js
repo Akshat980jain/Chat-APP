@@ -36,34 +36,58 @@ const getImageUrl = (url) => {
   return `${API_BASE_URL}${formattedUrl}`;
 };
 
-const AddChatByPhone = ({ open, onClose, onUserFound }) => {
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+const AddChatByPhone = ({
+  open,
+  onClose,
+  onAdd,
+  error = '',
+}) => {
+  const [phone, setPhone] = useState('');
+  const [inputError, setInputError] = useState('');
   const [userFound, setUserFound] = useState(null);
   const [userNotFound, setUserNotFound] = useState(false);
+  const [loading, setLoading] = useState(false);
   const { refreshToken, user } = useAuth();
 
+  const handleAdd = () => {
+    // Basic phone validation (10-15 digits, allow +, -, spaces)
+    const phoneRegex = /^[\d\s\-+()]{10,15}$/;
+    if (!phoneRegex.test(phone)) {
+      setInputError('Please enter a valid phone number (10-15 digits)');
+      return;
+    }
+    setInputError('');
+    onAdd(phone);
+  };
+
+  const handleInputChange = (e) => {
+    setPhone(e.target.value);
+    setInputError('');
+  };
+
+  const handleClose = () => {
+    setPhone('');
+    setInputError('');
+    onClose();
+  };
+
   const handleSearchByPhone = async () => {
-    if (!phoneNumber) {
-      setError('Please enter a phone number');
+    if (!phone) {
+      setInputError('Please enter a phone number');
       return;
     }
 
     // Reset states before starting new search
-    setError('');
+    setInputError('');
     setUserFound(null);
     setUserNotFound(false);
     setLoading(true);
     
     try {
-      console.log('Searching for user with phone number:', phoneNumber);
-      
       // Try to refresh token before searching
       try {
         await refreshToken();
       } catch (refreshError) {
-        console.error("Token refresh failed:", refreshError);
         // Continue with existing token if refresh fails
       }
       
@@ -74,24 +98,20 @@ const AddChatByPhone = ({ open, onClose, onUserFound }) => {
       }
       
       // Make the API call with explicit URL and properly formatted Authorization header
-      const response = await axios.get(`${API_BASE_URL}/api/users/search/phone/${phoneNumber}`, {
+      const response = await axios.get(`${API_BASE_URL}/api/users/search/phone/${phone}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
       
-      console.log('User search response:', response.data);
-      
       // Check if the found user is the current user
       if (response.data && response.data._id === user.id) {
-        setError("You can't add yourself as a contact");
+        setInputError("You can't add yourself as a contact");
         return;
       }
       
       setUserFound(response.data);
     } catch (error) {
-      console.error('Error searching user by phone:', error);
-      
       let errorMessage = 'Failed to search user';
       
       if (error.response) {
@@ -124,7 +144,7 @@ const AddChatByPhone = ({ open, onClose, onUserFound }) => {
         errorMessage = error.message || errorMessage;
       }
       
-      setError(errorMessage);
+      setInputError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -132,49 +152,53 @@ const AddChatByPhone = ({ open, onClose, onUserFound }) => {
 
   const handleAddChat = () => {
     if (userFound) {
-      onUserFound(userFound);
+      onAdd(userFound);
       handleReset();
     }
   };
 
   const handleReset = () => {
-    setPhoneNumber('');
-    setError('');
+    setPhone('');
+    setInputError('');
     setUserFound(null);
     setUserNotFound(false);
     onClose();
   };
 
   const formatPhoneNumber = (value) => {
-    // Allow only numbers, hyphens, plus sign, and spaces
-    const cleaned = value.replace(/[^\d\s\-+]/g, '');
-    setPhoneNumber(cleaned);
+    // Remove all non-digit characters
+    const cleaned = value.replace(/\D/g, '');
+    
+    // Format the number as XXX-XXX-XXXX
+    let formatted = cleaned;
+    if (cleaned.length > 3) {
+      formatted = cleaned.slice(0, 3);
+    }
+    if (cleaned.length > 6) {
+      formatted = formatted.slice(0, 7) + '-' + formatted.slice(7);
+    }
+    
+    setPhone(formatted);
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle sx={{ pb: 1 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <PersonAddIcon color="primary" />
-          <Typography variant="h6">Add Chat by Phone Number</Typography>
-        </Box>
-      </DialogTitle>
+    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Add Chat by Phone</DialogTitle>
       <DialogContent>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+        <Box display="flex" flexDirection="column" gap={2}>
           <TextField
-            fullWidth
             label="Phone Number"
-            variant="outlined"
-            value={phoneNumber}
-            onChange={(e) => formatPhoneNumber(e.target.value)}
-            placeholder="Enter phone number (e.g., 123-456-7890)"
+            value={phone}
+            onChange={handleInputChange}
+            fullWidth
             disabled={loading}
-            helperText="Use format like 123-456-7890 or +1 123 456 7890"
+            error={!!inputError}
+            helperText={inputError || 'Enter the phone number of the user you want to chat with.'}
             autoFocus
           />
-          
-          {error && <Alert severity="error">{error}</Alert>}
-          
+          {error && (
+            <Typography color="error" variant="body2">{error}</Typography>
+          )}
           {userNotFound && (
             <Paper 
               elevation={0} 
@@ -230,25 +254,26 @@ const AddChatByPhone = ({ open, onClose, onUserFound }) => {
           )}
         </Box>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 3 }}>
-        <Button onClick={handleReset} color="inherit" variant="outlined">
+      <DialogActions sx={{ justifyContent: 'center', gap: 2 }}>
+        <Button onClick={handleClose} disabled={loading} variant="outlined">
           Cancel
         </Button>
         {!userFound && !userNotFound ? (
           <Button 
             onClick={handleSearchByPhone} 
-            color="primary" 
+            disabled={loading || !phone}
             variant="contained"
-            disabled={loading || !phoneNumber}
-            startIcon={loading ? <CircularProgress size={20} /> : <PersonSearchIcon />}
+            color="primary"
+            startIcon={loading ? <CircularProgress size={24} /> : <PersonSearchIcon />}
           >
             {loading ? 'Searching...' : 'Search'}
           </Button>
         ) : userFound ? (
           <Button
             onClick={handleAddChat}
-            color="primary"
+            disabled={loading}
             variant="contained"
+            color="primary"
             startIcon={<PersonAddIcon />}
           >
             Add Chat
@@ -257,10 +282,11 @@ const AddChatByPhone = ({ open, onClose, onUserFound }) => {
           <Button 
             onClick={() => {
               setUserNotFound(false);
-              setPhoneNumber('');
+              setPhone('');
             }} 
-            color="primary" 
+            disabled={loading}
             variant="contained"
+            color="primary"
           >
             Try Again
           </Button>

@@ -172,7 +172,7 @@ router.get('/search/phone/:phoneNumber', auth, async (req, res) => {
     }
     
     // Create a normalized version of the phone number for comparison
-    // This removes spaces, hyphens, and other formatting
+    // This removes all non-digit characters
     const normalizedPhoneNumber = phoneNumber.replace(/\D/g, '');
     console.log('Normalized phone number:', normalizedPhoneNumber);
     
@@ -185,7 +185,9 @@ router.get('/search/phone/:phoneNumber', auth, async (req, res) => {
             { phoneNumber: phoneNumber },
             { phoneNumber: normalizedPhoneNumber },
             // Allow for partial matches at the end (e.g., without country code)
-            { phoneNumber: { $regex: normalizedPhoneNumber + '$' } }
+            { phoneNumber: { $regex: normalizedPhoneNumber + '$' } },
+            // Also try matching with formatted version (XXX-XXX-XXXX)
+            { phoneNumber: { $regex: normalizedPhoneNumber.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3') } }
           ]
         }
       ]
@@ -298,6 +300,20 @@ router.post('/profile/picture', auth, upload.single('profilePicture'), async (re
       return res.status(400).json({ msg: 'File too large, max size is 5MB' });
     }
     res.status(500).json({ msg: err.message || 'Server error' });
+  }
+});
+
+// Get current user info
+router.get('/me', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user);
+  } catch (err) {
+    console.error('Error fetching current user:', err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

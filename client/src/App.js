@@ -7,7 +7,6 @@ import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 import Chat from './components/chat/Chat';
 import Settings from './pages/Settings';
-import Profile from './pages/Profile';
 import AppLayout from './components/layout/AppLayout';
 import MobileNavigation from './components/layout/MobileNavigation';
 import ServerConnectionFixer from './components/ServerConnectionFixer';
@@ -428,7 +427,6 @@ function App() {
               }>
                 <Route path="/" element={<Chat />} />
                 <Route path="/settings" element={<Settings />} />
-                <Route path="/profile" element={<Profile />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

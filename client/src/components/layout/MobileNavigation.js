@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import ProfilePicture from '../profile/ProfilePicture';
 import ThemeToggle from './ThemeToggle';
 
 // Import bootstrap icons (we'll need to install this package)
@@ -74,12 +73,12 @@ const MobileNavigation = () => {
                 >
                   <div className="d-flex align-items-center">
                     <div className="avatar-container" style={{width: '22px', height: '22px'}}>
-                      <ProfilePicture 
+                      {/* Removed: <ProfilePicture 
                         userId={user._id} 
                         size="xs" 
                         showStatus={false}
                         className="rounded-full ring-1 ring-white/30 dark:ring-neutral-800/50"
-                      />
+                      /> */}
                     </div>
                   </div>
                 </button>

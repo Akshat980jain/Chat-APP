@@ -105,33 +105,6 @@ const MobileNavBar = ({
           }
           value={1}
         />
-        
-        <BottomNavigationAction 
-          label="Profile" 
-          icon={
-            <Tooltip title={user?.name || 'Profile'}>
-              {user?.profilePicture ? (
-                <Avatar 
-                  src={user.profilePicture} 
-                  alt={user.name || 'User'}
-                  sx={{ 
-                    width: 24, 
-                    height: 24,
-                    border: totalBadgeCount > 0 ? '2px solid #ef4444' : 'none'
-                  }}
-                />
-              ) : (
-                <PersonIcon fontSize="small" />
-              )}
-            </Tooltip>
-          }
-          onClick={(e) => {
-            // Prevent navigation change
-            e.preventDefault();
-            if (onProfileClick) onProfileClick();
-          }}
-          value={2}
-        />
       </BottomNavigation>
     </Box>
   );

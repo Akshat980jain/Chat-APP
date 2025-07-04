@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, TextField, IconButton, InputAdornment } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
@@ -7,103 +7,141 @@ import MicIcon from '@mui/icons-material/Mic';
 
 const MessageInput = ({ 
   onSend, 
-  isMobile, 
-  value, 
+  isMobile = false, 
+  value = '', 
   onChange, 
   disabled = false, 
-  placeholder = "Type a message..." 
+  placeholder = "Type a message...",
+  maxLength = 2000,
+  onEmojiClick,
+  onAttachFile,
+  onMicClick,
+  showEmojiButton = true,
+  showAttachButton = true,
+  showMicButton = true,
+  autoFocus = false
 }) => {
   const [bottomOffset, setBottomOffset] = useState(0);
   const [chatColumnWidth, setChatColumnWidth] = useState('100%');
+  const [isComposing, setIsComposing] = useState(false);
   const inputRef = useRef(null);
+  
+  // Memoized resize handler
+  const handleResize = useCallback(() => {
+    const width = window.innerWidth;
+    
+    if (width > 1200) {
+      setChatColumnWidth('calc(100% - 320px)');
+    } else if (width > 768) {
+      setChatColumnWidth('calc(100% - 280px)');
+    } else {
+      setChatColumnWidth('100%');
+    }
+  }, []);
   
   // Handle window resize and detect iOS for proper positioning
   useEffect(() => {
-    const handleResize = () => {
-      const width = window.innerWidth;
-      // Adjust width based on screen size
-      if (width > 1200) {
-        setChatColumnWidth('calc(100% - 320px)'); // Sidebar width is 320px
-      } else if (width > 768) {
-        setChatColumnWidth('calc(100% - 280px)'); // Smaller sidebar on medium screens
-      } else {
-        setChatColumnWidth('100%'); // Full width on mobile
-      }
-    };
-    
     // Check if device is iOS for safe area insets
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    let offset = 0;
+    
     if (isIOS) {
-      // Add bottom padding for iOS safe area
-      setBottomOffset(20);
+      offset += 20; // iOS safe area
       document.body.classList.add('ios-device');
     }
     
     // Add bottom padding on small screens for the mobile nav bar
     if (isMobile && window.innerWidth <= 780) {
-      setBottomOffset(prev => prev + 56); // 56px is standard BottomNavigation height
+      offset += 56; // Standard BottomNavigation height
     }
     
+    setBottomOffset(offset);
     handleResize();
+    
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [isMobile]);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (isIOS) {
+        document.body.classList.remove('ios-device');
+      }
+    };
+  }, [isMobile, handleResize]);
+  
+  // Auto-focus effect
+  useEffect(() => {
+    if (autoFocus && inputRef.current && !isMobile) {
+      inputRef.current.focus();
+    }
+  }, [autoFocus, isMobile]);
   
   const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
       e.preventDefault();
       handleSubmit();
     }
   };
   
-  const handleSubmit = () => {
+  const handleSubmit = useCallback(() => {
     if (!value || value.trim() === '' || disabled) return;
     
-    onSend(value.trim());
+    const trimmedValue = value.trim();
+    if (trimmedValue.length > maxLength) {
+      console.warn(`Message exceeds maximum length of ${maxLength} characters`);
+      return;
+    }
     
-    // Focus the input after sending
-    if (inputRef.current) {
-      inputRef.current.focus();
+    onSend(trimmedValue);
+    
+    // Focus the input after sending (with slight delay for mobile)
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    }, isMobile ? 100 : 0);
+  }, [value, disabled, maxLength, onSend, isMobile]);
+  
+  const handleInputChange = useCallback((e) => {
+    if (!onChange) return;
+    
+    const eventValue = e?.target?.value ?? e?.value ?? '';
+    
+    // Enforce max length
+    if (eventValue.length > maxLength) {
+      return;
+    }
+    
+    // Create a standardized event object
+    const syntheticEvent = {
+      target: { value: eventValue },
+      preventDefault: () => {},
+      stopPropagation: () => {}
+    };
+    
+    onChange(syntheticEvent);
+  }, [onChange, maxLength]);
+  
+  const handleCompositionStart = () => {
+    setIsComposing(true);
+  };
+  
+  const handleCompositionEnd = () => {
+    setIsComposing(false);
+  };
+  
+  const handleFocus = () => {
+    // Mobile browsers sometimes need a timeout to properly focus
+    if (isMobile) {
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 100);
     }
   };
   
-  // Add this function to handle input changes properly
-  const handleInputChange = (e) => {
-    // Create a proper synthetic event object to pass to the parent onChange handler
-    if (onChange) {
-      // Support both direct string values and event objects
-      if (typeof e === 'string') {
-        onChange({
-          target: { value: e },
-          preventDefault: () => {},
-          stopPropagation: () => {}
-        });
-      } 
-      // Normal event object
-      else if (e && e.target && e.target.value !== undefined) {
-        onChange(e);
-      }
-      // Custom event object that might be missing properties
-      else if (e && e.value !== undefined) {
-        onChange({
-          target: { value: e.value },
-          preventDefault: () => {},
-          stopPropagation: () => {}
-        });
-      }
-      // Fallback for any other format
-      else {
-        console.warn('MessageInput: Received invalid input event format', e);
-        // Try to extract a value or just use empty string
-        const value = e?.toString?.() || '';
-        onChange({
-          target: { value },
-          preventDefault: () => {},
-          stopPropagation: () => {}
-        });
-      }
-    }
-  };
+  const remainingChars = maxLength - value.length;
+  const isNearLimit = remainingChars <= 100;
+  const hasContent = value && value.trim();
   
   return (
     <Box 
@@ -121,7 +159,13 @@ const MessageInput = ({
       <div className="container-fluid p-0">
         <div className="row g-2 align-items-center">
           <div className="col">
-            <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="d-flex align-items-center">
+            <form 
+              onSubmit={(e) => { 
+                e.preventDefault(); 
+                handleSubmit(); 
+              }} 
+              className="d-flex align-items-center"
+            >
               <TextField
                 inputRef={inputRef}
                 className="message-input"
@@ -130,40 +174,57 @@ const MessageInput = ({
                 value={value}
                 onChange={handleInputChange}
                 onKeyPress={handleKeyPress}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
+                onFocus={handleFocus}
                 fullWidth
                 autoComplete="off"
                 multiline
                 maxRows={4}
                 disabled={disabled}
-                onClick={() => {
-                  // Ensure input is focused when clicked
-                  if (inputRef.current) {
-                    inputRef.current.focus();
-                  }
-                }}
-                onFocus={() => {
-                  // Mobile browsers sometimes need a timeout to properly focus
-                  setTimeout(() => {
-                    if (inputRef.current) {
-                      inputRef.current.focus();
-                    }
-                  }, 100);
-                }}
+                error={remainingChars < 0}
+                helperText={
+                  isNearLimit && remainingChars >= 0 
+                    ? `${remainingChars} characters remaining` 
+                    : remainingChars < 0 
+                    ? `${Math.abs(remainingChars)} characters over limit`
+                    : undefined
+                }
                 InputProps={{
-                  startAdornment: (
+                  startAdornment: showEmojiButton && (
                     <InputAdornment position="start">
-                      <IconButton color="primary" size="small" disabled={disabled}>
+                      <IconButton 
+                        color="primary" 
+                        size="small" 
+                        disabled={disabled}
+                        onClick={onEmojiClick}
+                        aria-label="Add emoji"
+                      >
                         <EmojiEmotionsIcon />
                       </IconButton>
                     </InputAdornment>
                   ),
                   endAdornment: (
                     <InputAdornment position="end">
-                      <IconButton color="primary" size="small" disabled={disabled}>
-                        <AttachFileIcon />
-                      </IconButton>
-                      {(!value || !value.trim()) && (
-                        <IconButton color="primary" size="small" disabled={disabled}>
+                      {showAttachButton && (
+                        <IconButton 
+                          color="primary" 
+                          size="small" 
+                          disabled={disabled}
+                          onClick={onAttachFile}
+                          aria-label="Attach file"
+                        >
+                          <AttachFileIcon />
+                        </IconButton>
+                      )}
+                      {showMicButton && !hasContent && (
+                        <IconButton 
+                          color="primary" 
+                          size="small" 
+                          disabled={disabled}
+                          onClick={onMicClick}
+                          aria-label="Voice message"
+                        >
                           <MicIcon />
                         </IconButton>
                       )}
@@ -171,17 +232,24 @@ const MessageInput = ({
                   )
                 }}
               />
-              {value && value.trim() && (
+              {hasContent && (
                 <IconButton 
                   color="primary" 
                   onClick={handleSubmit}
-                  disabled={disabled}
+                  disabled={disabled || remainingChars < 0}
+                  aria-label="Send message"
                   sx={{ 
                     ml: 1,
-                    backgroundColor: disabled ? 'rgba(0, 0, 0, 0.12)' : 'primary.main',
-                    color: disabled ? 'text.disabled' : 'white',
+                    backgroundColor: disabled || remainingChars < 0 
+                      ? 'rgba(0, 0, 0, 0.12)' 
+                      : 'primary.main',
+                    color: disabled || remainingChars < 0 
+                      ? 'text.disabled' 
+                      : 'white',
                     '&:hover': {
-                      backgroundColor: disabled ? 'rgba(0, 0, 0, 0.12)' : 'primary.dark',
+                      backgroundColor: disabled || remainingChars < 0 
+                        ? 'rgba(0, 0, 0, 0.12)' 
+                        : 'primary.dark',
                     }
                   }}
                 >
@@ -196,4 +264,4 @@ const MessageInput = ({
   );
 };
 
-export default MessageInput; 
+export default MessageInput;

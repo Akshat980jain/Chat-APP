@@ -57,11 +57,6 @@ import axios from 'axios';
 import { format } from 'timeago.js';
 import AddChatByPhone from './AddChatByPhone';
 import { setAuthToken } from '../../contexts/AuthContext';
-import ProfileMenu from '../profile/ProfileMenu';
-import CallModal from '../call/CallModal';
-import IncomingCallAlert from '../call/IncomingCallAlert';
-import NotificationsIcon from '@mui/icons-material/Notifications';
-import ProfilePicture from '../profile/ProfilePicture';
 import MobileNavigation from '../layout/MobileNavigation';
 import ChatInputMobile from './ChatInputMobile';
 import BackupSendButton from './BackupSendButton';
@@ -124,7 +119,6 @@ const getImageUrl = (url) => {
   
   // If it's already a full URL, return it as is
   if (url.startsWith('http')) {
-    console.log('Using absolute image URL:', url);
     return url;
   }
   
@@ -132,7 +126,6 @@ const getImageUrl = (url) => {
   const formattedUrl = url.startsWith('/') ? url : `/${url}`;
   const fullUrl = `${API_BASE_URL}${formattedUrl}`;
   
-  console.log('Formatted image URL:', fullUrl);
   return fullUrl;
 };
 
@@ -205,7 +198,6 @@ const Chat = () => {
   const [currentCall, setCurrentCall] = useState(null);
   const [incomingCallData, setIncomingCallData] = useState(null);
   const [ringtoneAudio, setRingtoneAudio] = useState(null);
-  const [profileAnchorEl, setProfileAnchorEl] = useState(null);
   const messagesContainerRef = useRef(null);
   const [sendingMessage, setSendingMessage] = useState(false);
   
@@ -843,46 +835,26 @@ const Chat = () => {
     }
   }, [socket, connected, messages, selectedChat, selectedUser, user, emitEvent, scrollToBottom, playNotificationSound, setChats, fetchChats]);
 
-  // Adjust the chat refresh useEffect to use a longer interval and add a loading check
-  useEffect(() => {
-    if (user && connectionStatus === 'connected') {
-      console.log("Fetching initial data with user:", user.id);
-      
-      // Only fetch chats and users on initial load if they haven't been loaded yet
-      if (!chatLoading && !userLoading && chats.length === 0) {
-        console.log("Initial chats fetch - list is empty");
-        Promise.all([fetchUsers(), fetchChats()])
-          .catch(err => {
-            console.error("Error loading initial data:", err);
-          });
-      }
-      
-      // Set up a very infrequent periodic refresh as a safety backup
-      const refreshInterval = setInterval(() => {
-        // Only refresh if not loading, app is in foreground, and there's been a significant time since last fetch
-        if (!chatLoading && !document.hidden && chats.length > 0) {
-          console.log("[Safety backup refresh] Checking for updates (infrequent)");
-          // Only refresh at a very long interval (10 minutes)
-      fetchChats();
-    }
-      }, 600000); // Every 10 minutes
-      
-      return () => {
-        clearInterval(refreshInterval);
-      };
-    }
-  }, [user, connectionStatus, fetchUsers, fetchChats, loading, chats.length]);
-
-  // Simplify the socket connection effect to avoid duplicate data fetching
+  // Single, optimized polling mechanism
   useEffect(() => {
     let chatRefreshInterval;
     
     if (socket && connected) {
-      // Only fetch messages if a chat is selected, and only at a reasonable interval
+      // Set up a single interval for both chat and message updates
       chatRefreshInterval = setInterval(() => {
-        if (!document.hidden && !loading && selectedChat && selectedUser) {
-          // Only refresh messages for the selected chat
-          fetchMessages(selectedUser._id);
+        if (!document.hidden && !loading) {
+          // Only fetch messages if a chat is selected
+          if (selectedChat && selectedUser) {
+            fetchMessages(selectedUser._id);
+          }
+          
+          // Only fetch chats if it's been at least 5 minutes since last fetch
+          const lastRefreshTime = sessionStorage.getItem('lastChatRefresh');
+          const now = Date.now();
+          if (!lastRefreshTime || (now - parseInt(lastRefreshTime)) > 300000) {
+            fetchChats();
+            sessionStorage.setItem('lastChatRefresh', now.toString());
+          }
         }
       }, 300000); // Every 5 minutes
     }
@@ -892,65 +864,48 @@ const Chat = () => {
         clearInterval(chatRefreshInterval);
       }
     };
-  }, [socket, connected, selectedChat, selectedUser, fetchMessages, loading]);
+  }, [socket, connected, selectedChat, selectedUser, fetchMessages, fetchChats, loading]);
 
-  // Update the visibility change handler to be less aggressive
+  // Add at the top of the Chat component
+  const didFetchInitialData = useRef(false);
+
+  // Replace the initial data fetch useEffect with this:
+  useEffect(() => {
+    if (
+      user &&
+      connectionStatus === 'connected' &&
+      !didFetchInitialData.current
+    ) {
+      didFetchInitialData.current = true;
+      Promise.all([fetchUsers(), fetchChats()])
+        .catch(err => {
+          console.error("Error loading initial data:", err);
+        });
+    }
+  }, [user, connectionStatus, fetchUsers, fetchChats]);
+
+  // Visibility change handler
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (!document.hidden && connectionStatus === 'connected') {
-        // Only refresh data when user returns to the tab after being away for a while
-        console.log("Tab became visible, checking for updates");
+      if (!document.hidden && connectionStatus === 'connected' && !loading) {
+        const lastRefreshTime = sessionStorage.getItem('lastChatRefresh');
+        const now = Date.now();
         
-        if (!loading && chats.length > 0) {
-          // Use timestamp comparison to decide whether to refresh
-          const lastRefreshTime = sessionStorage.getItem('lastChatRefresh');
-          const now = Date.now();
+        if (!lastRefreshTime || (now - parseInt(lastRefreshTime)) > 300000) {
+          console.log("Refreshing data after tab visibility change");
+          fetchChats();
+          sessionStorage.setItem('lastChatRefresh', now.toString());
           
-          // Only refresh if it's been at least 5 minutes since last refresh
-          if (!lastRefreshTime || (now - parseInt(lastRefreshTime)) > 300000) {
-            console.log("Refreshing data after tab visibility change (infrequent)");
-            fetchChats();
-            sessionStorage.setItem('lastChatRefresh', now.toString());
-            
-            if (selectedChat && selectedUser) {
-              fetchMessages(selectedUser._id);
-            }
-          } else {
-            console.log("Skipping refresh, last refresh was too recent");
+          if (selectedChat && selectedUser) {
+            fetchMessages(selectedUser._id);
           }
         }
       }
     };
     
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [connectionStatus, fetchChats, fetchMessages, selectedChat, selectedUser, loading, chats.length]);
-
-  // Fetch initial data
-  useEffect(() => {
-    if (user && connectionStatus === 'connected') {
-      // Initial data is already fetched by our enhanced useEffect above
-      // This is just keeping a long interval refresh as a backup
-      
-      // Set up a very infrequent periodic refresh as a safety backup
-      const refreshInterval = setInterval(() => {
-        // Only refresh if not loading and app is in foreground
-        if (!loading && !document.hidden) {
-          console.log("[Safety backup refresh] Checking for updates");
-          // Don't call these directly - they're already handled by the main refresh logic
-          // fetchUsers();
-          // fetchChats();
-        }
-      }, 600000); // Every 10 minutes instead of every minute
-      
-      return () => {
-        clearInterval(refreshInterval);
-      };
-    }
-  }, [user, connectionStatus, loading]);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [connectionStatus, fetchChats, fetchMessages, selectedChat, selectedUser, loading]);
 
   // Add a debug helper for development mode
   const isDevEnvironment = process.env.NODE_ENV === 'development';
@@ -2729,7 +2684,7 @@ const Chat = () => {
               document.body.appendChild(btn);
               
               // Open profile menu anchored to this element
-              setProfileAnchorEl(btn);
+              setProfileMenuOpen(true);
               
               // Clean up after menu closes
               setTimeout(() => {

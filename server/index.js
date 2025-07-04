@@ -56,8 +56,43 @@ const app = express();
 // Connect Database
 connectDB();
 
-// Init Middleware
-app.use(express.json({ extended: false }));
+// Init Middleware with better error handling
+app.use(express.json({ 
+  extended: false,
+  limit: '10mb',
+  verify: (req, res, buf) => {
+    try {
+      JSON.parse(buf);
+    } catch (e) {
+      console.error('JSON verification failed:', {
+        error: e.message,
+        body: buf.toString(),
+        url: req.url,
+        method: req.method
+      });
+      throw new Error('Invalid JSON format');
+    }
+  }
+}));
+
+// Enhanced error handling for JSON parsing (must come after express.json())
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error('JSON parsing error:', {
+      error: err.message,
+      body: err.body,
+      url: req.url,
+      method: req.method,
+      headers: req.headers
+    });
+    return res.status(400).json({ 
+      message: 'Invalid JSON format in request body',
+      error: 'The request body must be valid JSON'
+    });
+  }
+  next();
+});
+
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -66,6 +101,23 @@ app.use(cors({
 
 // Serve static files from the uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Add request logging middleware for debugging
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  console.log('Headers:', {
+    'content-type': req.headers['content-type'],
+    'user-agent': req.headers['user-agent'],
+    'content-length': req.headers['content-length']
+  });
+  
+  // Log body for POST/PUT requests to auth endpoints
+  if ((req.method === 'POST' || req.method === 'PUT') && req.url.includes('/api/auth/')) {
+    console.log('Request body preview:', req.body ? JSON.stringify(req.body).substring(0, 200) + '...' : 'No body');
+  }
+  
+  next();
+});
 
 // Add route handlers
 const authRoutes = require('./routes/auth');

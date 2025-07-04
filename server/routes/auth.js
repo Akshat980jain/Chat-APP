@@ -15,9 +15,26 @@ router.post('/register', async (req, res) => {
     const { name, email, phoneNumber, password } = req.body;
 
     // Input validation
-    if (!name || !email || !password) {
-      console.log('Missing required fields:', { name, email, password: password ? 'provided' : 'missing' });
-      return res.status(400).json({ message: 'Please provide name, email and password' });
+    if (!name || !email || !password || !phoneNumber) {
+      console.log('Missing required fields:', { name, email, phoneNumber, password: password ? 'provided' : 'missing' });
+      return res.status(400).json({ message: 'Please provide name, email, phone number and password' });
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: 'Please provide a valid email address' });
+    }
+
+    // Password validation
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+    }
+
+    // Phone number validation
+    const phoneRegex = /^[\d\s\-+()]{10,15}$/;
+    if (!phoneRegex.test(phoneNumber.replace(/\D/g, '')) || phoneNumber.replace(/\D/g, '').length < 10) {
+      return res.status(400).json({ message: 'Please provide a valid phone number (at least 10 digits)'});
     }
 
     // Check if user already exists
@@ -25,7 +42,7 @@ router.post('/register', async (req, res) => {
     let user = await User.findOne({ email });
     if (user) {
       console.log('User already exists with email:', email);
-      return res.status(400).json({ message: 'User already exists' });
+      return res.status(400).json({ message: 'User already exists with this email' });
     }
 
     // Create user profile picture URL if not provided
@@ -34,16 +51,17 @@ router.post('/register', async (req, res) => {
     // Create new user
     console.log('Creating new user with email:', email);
     user = new User({
-      name,
-      email,
-      phoneNumber,
-      password,
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      phoneNumber: phoneNumber ? phoneNumber.trim() : '',
+      password: password,
       profilePicture,
       status: 'Hey there! I am using Chat App',
       isOnline: true,
       lastSeen: new Date()
     });
 
+    // Save user - this will trigger the pre-save hook to hash the password
     console.log('Saving user to database...');
     await user.save();
     console.log('User saved successfully with ID:', user._id);
@@ -125,16 +143,28 @@ router.post('/register', async (req, res) => {
     });
   } catch (error) {
     console.error('Registration error details:', error);
+    
     // More detailed error handling
     if (error.name === 'ValidationError') {
       console.error('Validation error:', error.message);
-      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      return res.status(400).json({ 
+        message: 'Validation error', 
+        errors: Object.values(error.errors).map(err => err.message)
+      });
     }
+    
     if (error.code === 11000) {
       console.error('Duplicate key error:', error);
       return res.status(400).json({ message: 'Email already exists' });
     }
-    res.status(500).json({ message: 'Server error', error: error.message });
+    
+    // Log the full error for debugging
+    console.error('Full registration error:', error);
+    
+    res.status(500).json({ 
+      message: 'Server error during registration',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'An unexpected error occurred'
+    });
   }
 });
 
@@ -145,14 +175,40 @@ router.post('/login', async (req, res) => {
       ip: req.ip,
       userAgent: req.headers['user-agent'],
       contentType: req.headers['content-type'],
-      body: req.body
+      body: req.body,
+      bodyType: typeof req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : 'no body'
     });
+    
+    // Validate request body
+    if (!req.body || typeof req.body !== 'object') {
+      console.error('Invalid request body type:', typeof req.body, req.body);
+      return res.status(400).json({ 
+        message: 'Invalid request format. Expected JSON object with email and password.' 
+      });
+    }
     
     const { email, password } = req.body;
 
     if (!email || !password) {
-      console.log('Missing credentials in login request');
+      console.log('Missing credentials in login request:', { 
+        hasEmail: !!email, 
+        hasPassword: !!password,
+        bodyKeys: Object.keys(req.body)
+      });
       return res.status(400).json({ message: 'Email and password are required' });
+    }
+
+    // Validate email format
+    if (typeof email !== 'string' || !email.includes('@')) {
+      console.error('Invalid email format:', email);
+      return res.status(400).json({ message: 'Please provide a valid email address' });
+    }
+
+    // Validate password format
+    if (typeof password !== 'string' || password.length === 0) {
+      console.error('Invalid password format:', typeof password);
+      return res.status(400).json({ message: 'Please provide a valid password' });
     }
 
     // Check if user exists

@@ -9,7 +9,6 @@ import NotificationsIcon from '@mui/icons-material/Notifications';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import { useAuth } from '../../contexts/AuthContext';
 import ThemeToggle from './ThemeToggle';
-import ProfilePicture from '../profile/ProfilePicture';
 
 const AppLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -91,21 +90,9 @@ const AppLayout = () => {
           {/* Logo and close button for mobile */}
           <div className="flex items-center justify-between pb-6 mb-6 border-b border-neutral-200/30 dark:border-neutral-700/30">
             <div className="flex items-center space-x-3">
-              {user ? (
-                <div className="w-12 h-12 rounded-2xl overflow-hidden flex items-center justify-center shadow-lg transform hover:scale-105 transition-all duration-300 bg-gradient-to-br from-primary-500/70 to-primary-600/70 backdrop-blur-md border border-white/20 dark:border-neutral-700/20">
-                  <ProfilePicture 
-                    userId={user._id} 
-                    size="md" 
-                    showStatus={false}
-                    className="w-full h-full"
-                    shape="square"
-                  />
-                </div>
-              ) : (
-                <div className="w-12 h-12 bg-gradient-to-br from-primary-500 to-primary-600 text-white rounded-2xl flex items-center justify-center shadow-lg transform hover:scale-105 transition-all duration-300 border border-white/20 dark:border-neutral-700/20">
-                  <ChatIcon />
-                </div>
-              )}
+              <div className="w-12 h-12 bg-gradient-to-br from-primary-500 to-primary-600 text-white rounded-2xl flex items-center justify-center shadow-lg transform hover:scale-105 transition-all duration-300 border border-white/20 dark:border-neutral-700/20">
+                <ChatIcon />
+              </div>
               <div>
                 <h1 className="text-xl font-display font-semibold text-neutral-900 dark:text-white">
                   Modern Chat
@@ -123,29 +110,6 @@ const AppLayout = () => {
               <CloseIcon fontSize="small" />
             </button>
           </div>
-          
-          {/* User Profile */}
-          {user && (
-            <div className="group flex items-center space-x-3 p-4 rounded-2xl bg-white/40 dark:bg-neutral-800/40 backdrop-blur-xl mb-6 shadow hover:shadow-md border border-white/30 dark:border-neutral-700/30 hover:border-white/50 dark:hover:border-neutral-600/50 transition-all duration-300">
-              <ProfilePicture 
-                userId={user._id} 
-                size="md" 
-                showStatus={true} 
-                className="ring-2 ring-white/50 dark:ring-neutral-700/50 group-hover:ring-primary-200 dark:group-hover:ring-primary-800/30 transition-all duration-300"
-              />
-              <div className="flex-1 min-w-0">
-                <h2 className="text-sm font-medium truncate text-neutral-900 dark:text-white">
-                  {user.name}
-                </h2>
-                <div className="flex items-center">
-                  <span className="inline-block w-2 h-2 rounded-full bg-success-500 mr-1.5"></span>
-                  <p className="text-xs truncate text-neutral-500 dark:text-neutral-400">
-                    Online
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
           
           {/* Main Navigation */}
           <nav className="mb-6">
