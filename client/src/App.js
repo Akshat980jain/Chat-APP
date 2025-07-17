@@ -14,6 +14,7 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import axios from 'axios';
 import './components/chat/ModernChat.css'; // Import our new modern chat styles
+import Profile from './components/profile/Profile';
 
 // Attempt to determine the best API URL - this helps with multi-device setup
 const determineApiUrl = () => {
@@ -427,6 +428,7 @@ function App() {
               }>
                 <Route path="/" element={<Chat />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/profile" element={<Profile />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

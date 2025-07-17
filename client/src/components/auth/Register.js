@@ -58,6 +58,7 @@ const Register = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
@@ -405,6 +406,7 @@ const Register = () => {
     try {
       setLoading(true);
       setError('');
+      setSuccess('');
       
       console.log('Submitting enhanced registration form...');
       
@@ -430,30 +432,31 @@ const Register = () => {
         // Clear stored data on success
         localStorage.removeItem('registrationDraft');
         localStorage.removeItem('registrationBlocked');
-        navigate('/', { replace: true });
+        setSuccess('Registration successful! Redirecting to login...');
+        setTimeout(() => {
+          navigate('/login');
+        }, 2000);
+        return;
+      } else {
+        setError('Registration failed. Please try again.');
       }
     } catch (err) {
       console.error('Registration error:', err);
-      
       // Handle registration attempts
       setRegistrationAttempts(prev => {
         const newAttempts = prev + 1;
-        
         if (newAttempts >= MAX_REGISTRATION_ATTEMPTS) {
           setIsBlocked(true);
           setBlockTimeRemaining(BLOCK_DURATION / 1000);
-          
           localStorage.setItem('registrationBlocked', JSON.stringify({
             timestamp: Date.now(),
             attempts: newAttempts
           }));
-          
           startBlockTimer();
           setError(`Too many registration attempts. Please try again in ${Math.ceil(BLOCK_DURATION / 60000)} minutes.`);
         } else {
           setError(`${err.message || 'Registration failed. Please try again.'} (${newAttempts}/${MAX_REGISTRATION_ATTEMPTS} attempts)`);
         }
-        
         return newAttempts;
       });
     } finally {
@@ -836,6 +839,13 @@ const Register = () => {
           <Collapse in={!!error}>
             <Alert severity="error" sx={{ mb: 3 }}>
               {error}
+            </Alert>
+          </Collapse>
+
+          {/* Success Display */}
+          <Collapse in={!!success}>
+            <Alert severity="success" sx={{ mb: 3 }}>
+              {success}
             </Alert>
           </Collapse>
 
