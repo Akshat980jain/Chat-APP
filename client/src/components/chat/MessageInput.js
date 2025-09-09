@@ -145,30 +145,38 @@ const MessageInput = ({
   
   return (
     <Box 
-      className={`position-fixed bottom-0 py-2 px-3 ${isMobile ? 'w-100' : ''} bg-white dark:bg-gray-800 shadow-lg message-input-container`}
+      className={`position-fixed bottom-0 py-3 px-4 ${isMobile ? 'w-100' : ''} message-input-container`}
       sx={{
         width: isMobile ? '100%' : chatColumnWidth,
-        zIndex: 1001,
+        zIndex: 1050,
         pb: `${bottomOffset}px`,
-        transition: 'all 0.3s ease',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         right: 0,
-        borderTop: '1px solid',
-        borderColor: 'divider'
+        background: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        borderTop: '1px solid rgba(229, 231, 235, 0.5)',
+        boxShadow: '0 -4px 6px -1px rgba(0, 0, 0, 0.1), 0 -2px 4px -1px rgba(0, 0, 0, 0.06)',
+        '.dark &': {
+          background: 'rgba(31, 41, 55, 0.95)',
+          borderTopColor: 'rgba(75, 85, 99, 0.5)',
+          boxShadow: '0 -4px 6px -1px rgba(0, 0, 0, 0.2), 0 -2px 4px -1px rgba(0, 0, 0, 0.1)'
+        }
       }}
     >
       <div className="container-fluid p-0">
-        <div className="row g-2 align-items-center">
+        <div className="row g-3 align-items-end">
           <div className="col">
             <form 
               onSubmit={(e) => { 
                 e.preventDefault(); 
                 handleSubmit(); 
               }} 
-              className="d-flex align-items-center"
+              className="d-flex align-items-end gap-2"
             >
               <TextField
                 inputRef={inputRef}
-                className="message-input"
+                className="message-input flex-1"
                 placeholder={placeholder}
                 variant="outlined"
                 value={value}
@@ -181,6 +189,7 @@ const MessageInput = ({
                 autoComplete="off"
                 multiline
                 maxRows={4}
+                size="small"
                 disabled={disabled}
                 error={remainingChars < 0}
                 helperText={
@@ -190,6 +199,14 @@ const MessageInput = ({
                     ? `${Math.abs(remainingChars)} characters over limit`
                     : undefined
                 }
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 3,
+                    backgroundColor: 'background.default',
+                    transition: 'all 0.2s ease',
+                    fontSize: '0.9375rem'
+                  }
+                }}
                 InputProps={{
                   startAdornment: showEmojiButton && (
                     <InputAdornment position="start">
@@ -239,21 +256,32 @@ const MessageInput = ({
                   disabled={disabled || remainingChars < 0}
                   aria-label="Send message"
                   sx={{ 
-                    ml: 1,
-                    backgroundColor: disabled || remainingChars < 0 
+                    width: 48,
+                    height: 48,
+                    background: disabled || remainingChars < 0 
                       ? 'rgba(0, 0, 0, 0.12)' 
-                      : 'primary.main',
-                    color: disabled || remainingChars < 0 
-                      ? 'text.disabled' 
-                      : 'white',
+                      : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                    color: 'white',
+                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                     '&:hover': {
-                      backgroundColor: disabled || remainingChars < 0 
+                      background: disabled || remainingChars < 0 
                         ? 'rgba(0, 0, 0, 0.12)' 
-                        : 'primary.dark',
+                        : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                      transform: 'translateY(-2px) scale(1.05)',
+                      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)'
+                    },
+                    '&:active': {
+                      transform: 'translateY(0) scale(0.95)'
+                    },
+                    '&:disabled': {
+                      background: 'rgba(0, 0, 0, 0.12)',
+                      transform: 'none',
+                      boxShadow: 'none'
                     }
                   }}
                 >
-                  <SendIcon />
+                  <SendIcon sx={{ fontSize: '1.25rem' }} />
                 </IconButton>
               )}
             </form>

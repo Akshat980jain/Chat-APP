@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
@@ -13,6 +13,7 @@ import WifiOffIcon from '@mui/icons-material/WifiOff';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
 import ThemeToggle from './ThemeToggle';
+import { CircularProgress, Box } from '@mui/material';
 
 // Custom hook for breakpoint detection
 const useBreakpoint = () => {
@@ -45,6 +46,23 @@ const useBreakpoint = () => {
 
   return breakpoint;
 };
+
+// Enhanced loading component
+const LoadingFallback = () => (
+  <Box
+    display="flex"
+    alignItems="center"
+    justifyContent="center"
+    minHeight="200px"
+    flexDirection="column"
+    gap={2}
+  >
+    <CircularProgress size={40} thickness={4} />
+    <Typography variant="body2" color="text.secondary">
+      Loading...
+    </Typography>
+  </Box>
+);
 
 // Throttle utility
 const throttle = (func, limit) => {
@@ -571,9 +589,11 @@ const AppLayout = () => {
         </header>
         
         {/* Main content with enhanced animations */}
-        <div className="flex-1 overflow-auto main-content-wrapper auto-hide-scrollbar">
+        <div className="flex-1 overflow-auto main-content-wrapper auto-hide-scrollbar bg-gradient-to-br from-neutral-50/50 to-neutral-100/50 dark:from-neutral-900/50 dark:to-neutral-950/50">
           <div className="animate-fadeIn">
-            <Outlet />
+            <Suspense fallback={<LoadingFallback />}>
+              <Outlet />
+            </Suspense>
           </div>
         </div>
       </main>
@@ -581,10 +601,20 @@ const AppLayout = () => {
       {/* Enhanced Mobile backdrop */}
       {sidebarOpen && !isLargeScreen && (
         <div 
-          className="fixed inset-0 bg-black/40 z-30 lg:hidden backdrop-blur-md transition-all duration-300 animate-fadeIn"
+          className="fixed inset-0 bg-black/50 z-30 lg:hidden backdrop-blur-lg transition-all duration-300 animate-fadeIn"
           onClick={() => setSidebarOpen(false)}
           aria-hidden="true"
         />
+      )}
+      
+      {/* Enhanced connection status indicator */}
+      {!isConnected && (
+        <div className="fixed top-4 right-4 z-50 animate-slideDown">
+          <div className="bg-error-500/90 text-white px-3 py-2 rounded-lg shadow-lg backdrop-blur-sm flex items-center space-x-2">
+            <WifiOffIcon fontSize="small" />
+            <span className="text-sm font-medium">Reconnecting...</span>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -235,13 +235,14 @@ const ChatInputMobile = ({
   const hasContent = message.trim().length > 0;
 
   return (
-    <div className="chat-input-mobile">
+    <div className="chat-input-mobile position-fixed bottom-0 start-0 end-0 bg-white dark:bg-neutral-800 border-top border-neutral-200 dark:border-neutral-700 shadow-lg p-3" style={{zIndex: 1050}}>
       {error && (
-        <div className="alert alert-danger alert-dismissible fade show mb-2" role="alert">
-          <small>{error}</small>
+        <div className="alert alert-danger alert-dismissible fade show mb-3 border-0 rounded-3 shadow-sm" role="alert" style={{fontSize: '0.875rem'}}>
+          <i className="bi bi-exclamation-triangle-fill me-2"></i>
+          {error}
           <button 
             type="button" 
-            className="btn-close btn-close-sm" 
+            className="btn-close btn-close-sm opacity-75" 
             aria-label="Close"
             onClick={() => setError('')}
           ></button>
@@ -249,10 +250,10 @@ const ChatInputMobile = ({
       )}
       
       <form onSubmit={handleSubmit} className="d-flex align-items-center w-100">
-        <div className="input-group w-100">
+        <div className="input-group w-100 shadow-sm">
           <input
             type="text"
-            className={`form-control ${error ? 'is-invalid' : ''}`}
+            className={`form-control border-0 bg-neutral-100 dark:bg-neutral-700 rounded-start-pill px-4 py-3 ${error ? 'is-invalid' : ''}`}
             placeholder={placeholder}
             value={message}
             onChange={handleInputChange}
@@ -263,39 +264,67 @@ const ChatInputMobile = ({
             aria-describedby={showCharCount ? "char-count" : undefined}
             autoComplete="off"
             maxLength={maxLength}
+            style={{
+              fontSize: '16px', // Prevent zoom on iOS
+              transition: 'all 0.2s ease',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)'
+            }}
           />
           
           <button 
             type="submit"
-            className={`btn ms-2 ${hasContent ? 'btn-primary' : 'btn-outline-primary'}`}
+            className={`btn rounded-end-pill px-4 shadow-sm transition-all duration-200 ${
+              hasContent 
+                ? 'btn-primary bg-gradient-to-r from-primary-500 to-primary-600 border-0' 
+                : 'btn-outline-primary border-0 bg-neutral-100 dark:bg-neutral-700'
+            }`}
             disabled={!hasContent || isSending || disabled || remainingChars < 0 || !isConnected}
             aria-label="Send message"
             title={!isConnected ? 'Not connected' : 'Send message'}
+            style={{
+              minWidth: '60px',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
           >
             {isSending ? (
-              <div className="spinner-border spinner-border-sm text-light" role="status">
+              <div className="spinner-border spinner-border-sm" role="status" style={{width: '1rem', height: '1rem'}}>
                 <span className="visually-hidden">Sending...</span>
               </div>
             ) : (
-              <i className="bi bi-send-fill"></i>
+              <i className="bi bi-send-fill" style={{fontSize: '1rem'}}></i>
             )}
           </button>
         </div>
       </form>
       
       {showCharCount && (
-        <div className="d-flex justify-content-between align-items-center mt-1">
-          <small className="text-muted">
+        <div className="d-flex justify-content-between align-items-center mt-2 px-1">
+          <small className="text-muted d-flex align-items-center gap-1">
             {!isConnected && (
-              <span className="text-warning">
+              <span className="text-warning d-flex align-items-center gap-1">
                 <i className="bi bi-exclamation-triangle-fill me-1"></i>
                 Not connected
+              </span>
+            )}
+            {isConnected && (
+              <span className="text-success d-flex align-items-center gap-1">
+                <i className="bi bi-wifi me-1"></i>
+                Connected
               </span>
             )}
           </small>
           <small 
             id="char-count"
-            className={`text-muted ${isNearLimit ? 'text-warning' : ''} ${remainingChars < 0 ? 'text-danger' : ''}`}
+            className={`font-medium ${
+              remainingChars < 0 ? 'text-danger' : 
+              isNearLimit ? 'text-warning' : 
+              'text-muted'
+            }`}
+            style={{fontSize: '0.75rem'}}
           >
             {remainingChars} characters remaining
           </small>
