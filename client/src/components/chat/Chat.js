@@ -1277,6 +1277,7 @@ const Chat = () => {
       >
         <Tab
           icon={<Badge badgeContent={Object.keys(unreadCounts).length} color="primary"><ChatIcon /></Badge>}
+          }
           label="Chats"
           iconPosition="start"
         />
