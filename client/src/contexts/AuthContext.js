@@ -1,19 +1,33 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
+import { toast } from 'react-toastify';
 
-// Remove the top-level useCallback hooks
+// Optimized API URL detection with caching
+let cachedApiUrl = null;
+let lastDetectionTime = 0;
+const CACHE_DURATION = 30000; // 30 seconds
+
 const detectApiUrl = () => {
+  // Use cached URL if recent
+  if (cachedApiUrl && Date.now() - lastDetectionTime < CACHE_DURATION) {
+    return cachedApiUrl;
+  }
+  
   // Check localStorage first for manually set URL
   const storedUrl = localStorage.getItem('api_base_url');
   if (storedUrl) {
     console.log('Using stored API URL:', storedUrl);
+    cachedApiUrl = storedUrl;
+    lastDetectionTime = Date.now();
     return storedUrl;
   }
   
   // Check for environment variable
   if (process.env.REACT_APP_API_URL) {
     console.log('Using environment API URL:', process.env.REACT_APP_API_URL);
+    cachedApiUrl = process.env.REACT_APP_API_URL;
+    lastDetectionTime = Date.now();
     return process.env.REACT_APP_API_URL;
   }
   
@@ -27,6 +41,8 @@ const detectApiUrl = () => {
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       const localApiUrl = `http://localhost:5000`;
       console.log('Development mode detected, using local API URL:', localApiUrl);
+      cachedApiUrl = localApiUrl;
+      lastDetectionTime = Date.now();
       return localApiUrl;
     }
     
@@ -34,6 +50,8 @@ const detectApiUrl = () => {
     if (hostname.match(/^192\.168\.\d+\.\d+$/)) {
       const localApiUrl = `http://${hostname}:5000`;
       console.log('Local IP detected, using local API URL:', localApiUrl);
+      cachedApiUrl = localApiUrl;
+      lastDetectionTime = Date.now();
       return localApiUrl;
     }
   }
@@ -41,45 +59,36 @@ const detectApiUrl = () => {
   // Fallback to production URL
   const fallbackUrl = 'https://chat-app-backend-pus1.onrender.com';
   console.log('Using fallback API URL:', fallbackUrl);
+  cachedApiUrl = fallbackUrl;
+  lastDetectionTime = Date.now();
   return fallbackUrl;
 };
 
-// Get the API URL
-const API_URL = detectApiUrl();
-
-// Add axios interceptors for debugging
+// Optimized axios interceptors
 axios.interceptors.request.use(
   (config) => {
-    console.log('Axios request:', {
-      method: config.method,
-      url: config.url,
-      data: config.data,
-      headers: config.headers
-    });
+    // Only log in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('API Request:', config.method?.toUpperCase(), config.url);
+    }
     return config;
   },
   (error) => {
-    console.error('Axios request error:', error);
+    console.error('Request error:', error.message);
     return Promise.reject(error);
   }
 );
 
 axios.interceptors.response.use(
   (response) => {
-    console.log('Axios response:', {
-      status: response.status,
-      statusText: response.statusText,
-      data: response.data
-    });
+    // Only log errors and important responses
+    if (response.status >= 400 || process.env.NODE_ENV === 'development') {
+      console.log('API Response:', response.status, response.config.url);
+    }
     return response;
   },
   (error) => {
-    console.error('Axios response error:', {
-      message: error.message,
-      status: error.response?.status,
-      data: error.response?.data,
-      config: error.config
-    });
+    console.error('Response error:', error.response?.status, error.message);
     return Promise.reject(error);
   }
 );
@@ -93,7 +102,6 @@ export const useAuth = () => useContext(AuthContext);
 export const setAuthToken = (token) => {
   if (token) {
     axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    // Add as a default header for all axios requests
     axios.defaults.baseURL = detectApiUrl();
     localStorage.setItem('token', token);
   } else {
@@ -102,10 +110,22 @@ export const setAuthToken = (token) => {
   }
 };
 
-// Refresh token implementation
+// Simplified refresh token implementation
 export const refreshToken = async () => {
-  // No refresh token logic needed, just resolve immediately
-  return;
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) return false;
+    
+    const response = await axios.get('/api/auth/refresh-token');
+    if (response.data?.token) {
+      setAuthToken(response.data.token);
+      return true;
+    }
+  } catch (error) {
+    console.error('Token refresh failed:', error);
+    localStorage.removeItem('token');
+  }
+  return false;
 };
 
 // Helper to ensure profile picture URLs are correct
@@ -114,31 +134,24 @@ const formatUserData = (userData) => {
   
   const formattedUser = { ...userData };
   
-  // Add API_URL to profilePicture if it's a relative URL
   if (formattedUser.profilePicture && !formattedUser.profilePicture.startsWith('http')) {
     const currentApiUrl = detectApiUrl();
     formattedUser.profilePicture = `${currentApiUrl}${formattedUser.profilePicture}`;
-    console.log('Formatted profile picture URL:', formattedUser.profilePicture);
   }
   
   return formattedUser;
 };
 
-// Update the updateApiUrl function to handle URL changes properly
+// Optimized API URL update function
 const updateApiUrl = (newUrl) => {
   if (!newUrl) return false;
   
   try {
-    // Validate URL format
     new URL(newUrl);
-    
-    // Store in localStorage for persistence
     localStorage.setItem('api_base_url', newUrl);
-    
-    // Update axios defaults
     axios.defaults.baseURL = newUrl;
-    
-    console.log('API URL updated to:', newUrl);
+    cachedApiUrl = newUrl;
+    lastDetectionTime = Date.now();
     return true;
   } catch (error) {
     console.error('Invalid URL format:', error);
@@ -154,51 +167,56 @@ export const AuthProvider = ({ children }) => {
   const [serverAvailable, setServerAvailable] = useState(true);
   const [recentlyLoggedIn, setRecentlyLoggedIn] = useState(false);
   const [apiUrl, setApiUrl] = useState(detectApiUrl());
+  const [retryCount, setRetryCount] = useState(0);
+  const [lastErrorTime, setLastErrorTime] = useState(0);
   
+  // Optimized token expiration check
   // Check for token expiration
   const isTokenExpired = useCallback((token) => {
     if (!token) return true;
     
     try {
-      // Decode the JWT to get the expiration time
       const decoded = jwtDecode(token);
       const currentTime = Date.now() / 1000;
-      
-      // Check if token is expired or about to expire in the next 5 minutes
       return decoded.exp < currentTime + 300;
     } catch (error) {
-      console.error('Error checking token expiration:', error);
       return true;
     }
   }, []);
   
-  // Refresh token if needed
+  // Optimized token refresh
   const refreshTokenIfNeeded = useCallback(async () => {
-    // No refresh token logic needed, just resolve immediately
-    return;
+    const token = localStorage.getItem('token');
+    if (!token || !isTokenExpired(token)) return true;
+    
+    try {
+      const success = await refreshToken();
+      if (success) {
+        setRetryCount(0);
+        return true;
+      }
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+    }
+    
+    return false;
   }, []);
 
-  // Add updateUser function
+  // Optimized user update function
   const updateUser = useCallback((userData) => {
     if (!userData) return;
-    
-    console.log('Updating user with data:', userData);
-    
-    // Format the user data to ensure profile picture URLs are correct
     const formattedUserData = formatUserData(userData);
-    
-    console.log('Formatted user data:', formattedUserData);
-    
-    // Update the user state
     setUser(formattedUserData);
   }, []);
 
-  // Define loadUser function before using it 
+  // Optimized load user function
   const loadUser = useCallback(async () => {
+    // Prevent multiple simultaneous calls
+    if (loading) return;
+    
     setLoading(true);
     
     try {
-      // Check if we need to refresh the token first
       await refreshTokenIfNeeded();
       
       const token = localStorage.getItem('token');
@@ -207,21 +225,22 @@ export const AuthProvider = ({ children }) => {
       if (!token) {
         setUser(null);
         setAuthenticated(false);
-        setLoading(false);
         return;
       }
       
-      // Set the auth token in axios headers
       setAuthToken(token);
       
-      // Make the request to get the user data with a 10-second timeout
-      const response = await axios.get(`${currentApiUrl}/api/users/me`, { timeout: 10000 });
+      const response = await axios.get(`${currentApiUrl}/api/users/me`, { 
+        timeout: 8000,
+        retry: 2
+      });
       
       if (response.data) {
         setUser(formatUserData(response.data));
         setAuthenticated(true);
         setError(null);
         setServerAvailable(true);
+        setRetryCount(0);
       } else {
         setUser(null);
         setAuthenticated(false);
@@ -229,44 +248,41 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error('Error loading user:', error);
       
-      // Handle different types of connection errors
+      // Implement exponential backoff for retries
+      const now = Date.now();
+      if (now - lastErrorTime > 5000) { // Only retry if last error was more than 5 seconds ago
+        setRetryCount(prev => prev + 1);
+        setLastErrorTime(now);
+      }
+      
       if (error.message === 'Network Error' || 
           error.code === 'ERR_NETWORK' || 
           error.code === 'ECONNABORTED' ||
           (error.response && error.response.status >= 500)) {
         setServerAvailable(false);
-        setError('Cannot connect to server. Please check your internet connection or try again later.');
+        
+        if (retryCount < 3) {
+          // Auto-retry with exponential backoff
+          setTimeout(() => {
+            loadUser();
+          }, Math.min(1000 * Math.pow(2, retryCount), 10000));
+        } else {
+          setError('Cannot connect to server. Please check your connection.');
+        }
       }
       
       if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-        // Try to refresh the token
-        try {
-          await refreshToken();
-          // If successful, try loading user again - without recursive call
-          setLoading(true);
-          const newToken = localStorage.getItem('token');
-          if (newToken) {
-            setAuthToken(newToken);
-            const newResponse = await axios.get(`${detectApiUrl()}/api/users/me`, { timeout: 10000 });
-            if (newResponse.data) {
-              setUser(formatUserData(newResponse.data));
-              setAuthenticated(true);
-              setError(null);
-              setServerAvailable(true);
-            }
-          }
-        } catch (refreshError) {
-          // If refresh fails, log the user out
-          localStorage.removeItem('token');
-          localStorage.removeItem('refreshToken');
-          setAuthToken(null);
-          setError('Your session has expired. Please log in again.');
-        }
+        // Session expired
+        localStorage.removeItem('token');
+        setAuthToken(null);
+        setUser(null);
+        setAuthenticated(false);
+        setError('Session expired. Please log in again.');
       }
     } finally {
       setLoading(false);
     }
-  }, [refreshTokenIfNeeded]); // Remove loadUser from the dependency array to fix circular reference
+  }, [refreshTokenIfNeeded, retryCount, lastErrorTime]);
 
   // Create memoized versions of the API URL functions inside the component
   const memoizedDetectApiUrl = useCallback(() => {
@@ -369,84 +385,60 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
+      setRetryCount(0);
       
-      // Get current API URL using detectApiUrl
       const currentApiUrl = detectApiUrl();
-      console.log('Attempting login with API URL:', currentApiUrl);
       
-      // Add more detailed logging
-      console.log('Login attempt with email:', email);
-      console.log('User agent:', navigator.userAgent);
-      console.log('Platform:', navigator.platform);
-      console.log('Is Mobile:', /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
-      
-      // Prepare the request data
       const loginData = {
         email: email.trim(),
         password: password
       };
       
-      console.log('Login data being sent:', { ...loginData, password: '[REDACTED]' });
-      console.log('Login data type:', typeof loginData);
-      console.log('Login data stringified:', JSON.stringify(loginData));
-      
-      // Ensure axios is properly configured
       axios.defaults.baseURL = currentApiUrl;
       axios.defaults.headers.common['Content-Type'] = 'application/json';
       
-      // Make login request with explicit URL and timeout
       const response = await axios.post(`${currentApiUrl}/api/auth/login`, loginData, {
-        timeout: 15000, // Increase timeout for slow mobile connections
+        timeout: 10000,
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
         }
       });
       
-      console.log('Login response:', response.status, response.statusText);
-      
       if (response.data && response.data.token) {
-        console.log('Login successful, token received');
         localStorage.setItem('token', response.data.token);
         
-        // Store refresh token if available
         if (response.data.refreshToken) {
           localStorage.setItem('refreshToken', response.data.refreshToken);
         }
         
-        // Update axios defaults for future requests
         setAuthToken(response.data.token);
-        
-        // Set user data
         setUser(formatUserData(response.data.user));
         setAuthenticated(true);
         setRecentlyLoggedIn(true);
         setServerAvailable(true);
+        setRetryCount(0);
+        
+        toast.success('Login successful!');
         
         return true;
       } else {
-        console.error('No token in response:', response.data);
         throw new Error('No token received');
       }
     } catch (error) {
       console.error('Login error:', error);
-      console.error('Error details:', {
-        message: error.message,
-        code: error.code,
-        response: error.response ? {
-          status: error.response.status,
-          data: error.response.data
-        } : 'No response',
-        request: error.request ? 'Request sent but no response' : 'Request not sent'
-      });
       
       if (error.message === 'Network Error' || error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED') {
         setServerAvailable(false);
-        setError('Cannot connect to server. Please check your connection and ensure you\'re using the correct server URL.');
+        setError('Cannot connect to server. Please check your connection.');
+        toast.error('Connection failed. Please check your network.');
       } else if (error.response && error.response.data) {
-        setError(error.response.data.message || 'Login failed. Please check your credentials.');
+        const errorMsg = error.response.data.message || 'Login failed. Please check your credentials.';
+        setError(errorMsg);
+        toast.error(errorMsg);
       } else {
         setError('Login failed. Please try again.');
+        toast.error('Login failed. Please try again.');
       }
       
       return false;
@@ -467,11 +459,10 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
+      setRetryCount(0);
       
-      // Get current API URL using detectApiUrl (for consistency with login)
       const currentApiUrl = detectApiUrl();
       
-      // Ensure all data is properly formatted
       const userData = {
         name: name.trim(),
         email: email.trim(),
@@ -479,11 +470,8 @@ export const AuthProvider = ({ children }) => {
         password: password
       };
       
-      console.log('Attempting registration with data:', { ...userData, password: '[REDACTED]' });
-      console.log('Registration data type:', typeof userData);
-      console.log('Registration data stringified:', JSON.stringify(userData));
-      
       const response = await axios.post(`${currentApiUrl}/api/auth/register`, userData, {
+        timeout: 10000,
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
@@ -496,6 +484,9 @@ export const AuthProvider = ({ children }) => {
         setUser(formatUserData(response.data.user));
         setAuthenticated(true);
         setRecentlyLoggedIn(true);
+        setRetryCount(0);
+        
+        toast.success('Registration successful!');
         
         return true;
       } else {
@@ -506,11 +497,16 @@ export const AuthProvider = ({ children }) => {
       
       if (error.message === 'Network Error' || error.code === 'ERR_NETWORK') {
         setServerAvailable(false);
-        setError('Cannot connect to server. Please check your connection.');
+        const errorMsg = 'Cannot connect to server. Please check your connection.';
+        setError(errorMsg);
+        toast.error(errorMsg);
       } else if (error.response && error.response.data) {
-        setError(error.response.data.message || 'Registration failed. Please try again.');
+        const errorMsg = error.response.data.message || 'Registration failed. Please try again.';
+        setError(errorMsg);
+        toast.error(errorMsg);
       } else {
         setError('Registration failed. Please try again.');
+        toast.error('Registration failed. Please try again.');
       }
       
       return false;
@@ -527,6 +523,7 @@ export const AuthProvider = ({ children }) => {
     recentlyLoggedIn,
     authenticated,
     apiUrl,
+    retryCount,
     detectApiUrl: memoizedDetectApiUrl,
     setUser,
     setLoading,

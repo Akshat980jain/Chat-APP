@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { ErrorBoundary } from 'react-error-boundary';
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -10,12 +11,15 @@ import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import SearchIcon from '@mui/icons-material/Search';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import WifiOffIcon from '@mui/icons-material/WifiOff';
+import ErrorIcon from '@mui/icons-material/Error';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
 import ThemeToggle from './ThemeToggle';
 import { CircularProgress, Box } from '@mui/material';
+import { toast } from 'react-toastify';
 
-// Custom hook for breakpoint detection
+// Optimized breakpoint detection with throttling
 const useBreakpoint = () => {
   const [breakpoint, setBreakpoint] = useState(() => {
     const width = window.innerWidth;
@@ -36,19 +40,38 @@ const useBreakpoint = () => {
       else if (width >= 768) newBreakpoint = 'sm';
       else newBreakpoint = 'xs';
       
-      setBreakpoint(newBreakpoint);
+      if (newBreakpoint !== breakpoint) {
+        setBreakpoint(newBreakpoint);
+      }
     };
 
-    const throttledResize = throttle(handleResize, 100);
+    const throttledResize = throttle(handleResize, 150);
     window.addEventListener('resize', throttledResize);
     return () => window.removeEventListener('resize', throttledResize);
-  }, []);
+  }, [breakpoint]);
 
   return breakpoint;
 };
 
-// Enhanced loading component
+// Optimized loading component
 const LoadingFallback = () => (
+  <Box
+    display="flex"
+    alignItems="center"
+    justifyContent="center"
+    minHeight="150px"
+    flexDirection="column"
+    gap={2}
+  >
+    <CircularProgress size={32} thickness={4} />
+    <span className="text-sm text-neutral-500 dark:text-neutral-400">
+      Loading...
+    </span>
+  </Box>
+);
+
+// Error fallback component
+const ErrorFallback = ({ error, resetErrorBoundary }) => (
   <Box
     display="flex"
     alignItems="center"
@@ -56,15 +79,26 @@ const LoadingFallback = () => (
     minHeight="200px"
     flexDirection="column"
     gap={2}
+    p={4}
   >
-    <CircularProgress size={40} thickness={4} />
-    <Typography variant="body2" color="text.secondary">
-      Loading...
-    </Typography>
+    <ErrorIcon color="error" sx={{ fontSize: 48 }} />
+    <span className="text-lg font-semibold text-neutral-900 dark:text-white">
+      Something went wrong
+    </span>
+    <span className="text-sm text-neutral-500 dark:text-neutral-400 text-center">
+      {error.message || 'An unexpected error occurred'}
+    </span>
+    <button
+      onClick={resetErrorBoundary}
+      className="flex items-center space-x-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+    >
+      <RefreshIcon fontSize="small" />
+      <span>Try again</span>
+    </button>
   </Box>
 );
 
-// Throttle utility
+// Optimized throttle utility
 const throttle = (func, limit) => {
   let inThrottle;
   return function(...args) {
@@ -137,7 +171,7 @@ const AppLayout = () => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   
   const { user, logout } = useAuth();
-  const { socket, isConnected } = useSocket();
+  const { socket, isConnected, connectionState } = useSocket();
   const location = useLocation();
   const navigate = useNavigate();
   const breakpoint = useBreakpoint();
@@ -327,7 +361,7 @@ const AppLayout = () => {
   const ConnectionStatus = () => {
     if (isOffline) {
       return (
-        <div className="flex items-center space-x-2 text-warning-600 dark:text-warning-400 text-sm">
+        <div className="flex items-center space-x-2 text-error-600 dark:text-error-400 text-sm">
           <WifiOffIcon fontSize="small" />
           <span>Offline</span>
         </div>
@@ -336,12 +370,26 @@ const AppLayout = () => {
     
     if (!isConnected) {
       return (
-        <div className="flex items-center space-x-2 text-error-600 dark:text-error-400 text-sm">
-          <div className="w-2 h-2 bg-error-500 rounded-full animate-pulse"></div>
-          <span>Reconnecting...</span>
+        <div className="flex items-center space-x-2 text-warning-600 dark:text-warning-400 text-sm">
+          <div className="w-2 h-2 bg-warning-500 rounded-full animate-pulse"></div>
+          <span className="capitalize">{connectionState}</span>
         </div>
       );
     }
+
+    return (
+      <div className="flex items-center space-x-2 text-success-600 dark:text-success-400 text-sm">
+        <div className="w-2 h-2 bg-success-500 rounded-full"></div>
+        <span>Connected</span>
+      </div>
+    );
+  };
+
+  // Optimized error handler
+  const handleError = useCallback((error, errorInfo) => {
+    console.error('App error:', error, errorInfo);
+    toast.error('An unexpected error occurred. Please refresh the page.');
+  }, []);
 
     return null;
   };
@@ -589,11 +637,13 @@ const AppLayout = () => {
         </header>
         
         {/* Main content with enhanced animations */}
-        <div className="flex-1 overflow-auto main-content-wrapper auto-hide-scrollbar bg-gradient-to-br from-neutral-50/50 to-neutral-100/50 dark:from-neutral-900/50 dark:to-neutral-950/50">
+        <div className="flex-1 overflow-auto main-content-wrapper auto-hide-scrollbar">
           <div className="animate-fadeIn">
-            <Suspense fallback={<LoadingFallback />}>
-              <Outlet />
-            </Suspense>
+            <ErrorBoundary FallbackComponent={ErrorFallback} onError={handleError}>
+              <Suspense fallback={<LoadingFallback />}>
+                <Outlet />
+              </Suspense>
+            </ErrorBoundary>
           </div>
         </div>
       </main>
@@ -609,10 +659,10 @@ const AppLayout = () => {
       
       {/* Enhanced connection status indicator */}
       {!isConnected && (
-        <div className="fixed top-4 right-4 z-50 animate-slideDown">
-          <div className="bg-error-500/90 text-white px-3 py-2 rounded-lg shadow-lg backdrop-blur-sm flex items-center space-x-2">
+        <div className="fixed top-4 right-4 z-50">
+          <div className="bg-warning-500/90 text-white px-3 py-2 rounded-lg shadow-lg backdrop-blur-sm flex items-center space-x-2 animate-pulse">
             <WifiOffIcon fontSize="small" />
-            <span className="text-sm font-medium">Reconnecting...</span>
+            <span className="text-sm font-medium capitalize">{connectionState}</span>
           </div>
         </div>
       )}

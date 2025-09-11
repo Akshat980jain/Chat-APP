@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
+import { ErrorBoundary } from 'react-error-boundary';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
 import Login from './components/auth/Login';
@@ -62,93 +63,61 @@ const determineApiUrl = () => {
         urlsToTry.push(`http://${subnet}.${i}:5000`);
       }
     });
-  }
   
   // Filter out any undefined/null values
-  const validUrls = urlsToTry.filter(url => url);
   
   // Try connecting to each URL with a 3-second timeout
   let foundWorkingUrl = false;
-  
-  // Function to try the next URL in the list
-  const tryNextUrl = (index) => {
-    if (index >= validUrls.length || foundWorkingUrl) return;
-    
-    const url = validUrls[index];
-    console.log(`Trying API URL (${index+1}/${validUrls.length}):`, url);
-    
-    axios.get(`${url}/`, { timeout: 3000 })
-      .then(() => {
-        console.log('Found working API URL:', url);
-        localStorage.setItem('api_url', url);
-        foundWorkingUrl = true;
-        
-        // Refresh the page if we found a different URL than was being used
-        const currentUrl = localStorage.getItem('api_url');
-        if (currentUrl !== url) {
-          window.location.reload();
-        }
-      })
-      .catch(() => {
-        // Try the next URL
-        setTimeout(() => tryNextUrl(index + 1), 300);
-      });
-  };
-  
-  // Start trying URLs
-  tryNextUrl(0);
-};
-
-// Create theme with better dark mode support
+// Optimized theme configuration
 const lightTheme = createTheme({
   palette: {
     mode: 'light',
     primary: {
-      main: '#3b82f6', // Updated to blue-500
+      main: '#3b82f6',
       light: '#60a5fa',
       dark: '#2563eb',
     },
     secondary: {
-      main: '#8b5cf6', // Updated to purple-500
+      main: '#8b5cf6',
       light: '#a78bfa',
       dark: '#7c3aed',
     },
     success: {
-      main: '#10b981', // Updated to green-500
+      main: '#10b981',
       light: '#34d399',
       dark: '#059669',
     },
     error: {
-      main: '#ef4444', // Updated to red-500
+      main: '#ef4444',
       light: '#f87171',
       dark: '#dc2626',
     },
     warning: {
-      main: '#f59e0b', // Updated to amber-500
+      main: '#f59e0b',
       light: '#fbbf24',
       dark: '#d97706',
     },
     background: {
-      default: '#f9fafb', // Updated to gray-50
+      default: '#f9fafb',
       paper: '#ffffff',
     },
     text: {
-      primary: '#111827', // Updated to gray-900
-      secondary: '#6b7280', // Updated to gray-500
+      primary: '#111827',
+      secondary: '#6b7280',
     },
   },
   typography: {
     fontFamily: [
       'Inter var',
       'Inter',
-      'Roboto',
-      'Segoe UI',
-      'Arial',
+      '-apple-system',
+      'BlinkMacSystemFont',
       'sans-serif',
     ].join(','),
+    fontDisplay: 'swap',
   },
   shape: {
-    borderRadius: 12, // Increased border radius
+    borderRadius: 12,
   },
   components: {
     MuiButton: {
@@ -157,16 +126,8 @@ const lightTheme = createTheme({
           textTransform: 'none',
           borderRadius: 8,
           fontWeight: 500,
-          boxShadow: 'none',
           padding: '8px 16px',
-          '&:hover': {
-            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-          },
-        },
-        containedPrimary: {
-          '&:hover': {
-            backgroundColor: '#2563eb',
-          },
+          transition: 'all 0.2s ease',
         },
       },
     },
@@ -175,32 +136,8 @@ const lightTheme = createTheme({
         root: {
           '& .MuiOutlinedInput-root': {
             borderRadius: 12,
+            transition: 'all 0.2s ease',
           },
-        },
-      },
-    },
-    MuiDialog: {
-      styleOverrides: {
-        paper: {
-          borderRadius: 16,
-          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-        },
-      },
-    },
-    MuiPaper: {
-      styleOverrides: {
-        root: {
-          borderRadius: 12,
-        },
-        elevation1: {
-          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-        },
-      },
-    },
-    MuiAvatar: {
-      styleOverrides: {
-        root: {
-          border: '2px solid rgba(255, 255, 255, 0.8)',
         },
       },
     },
@@ -211,51 +148,51 @@ const darkTheme = createTheme({
   palette: {
     mode: 'dark',
     primary: {
-      main: '#3b82f6', // Updated to blue-500
+      main: '#3b82f6',
       light: '#60a5fa',
       dark: '#2563eb',
     },
     secondary: {
-      main: '#8b5cf6', // Updated to purple-500
+      main: '#8b5cf6',
       light: '#a78bfa',
       dark: '#7c3aed',
     },
     success: {
-      main: '#10b981', // Updated to green-500
+      main: '#10b981',
       light: '#34d399',
       dark: '#059669',
     },
     error: {
-      main: '#ef4444', // Updated to red-500
+      main: '#ef4444',
       light: '#f87171',
       dark: '#dc2626',
     },
     warning: {
-      main: '#f59e0b', // Updated to amber-500
+      main: '#f59e0b',
       light: '#fbbf24',
       dark: '#d97706',
     },
     background: {
-      default: '#111827', // Updated to gray-900
-      paper: '#1f2937', // Updated to gray-800
+      default: '#111827',
+      paper: '#1f2937',
     },
     text: {
-      primary: '#f9fafb', // Updated to gray-50
-      secondary: '#d1d5db', // Updated to gray-300
+      primary: '#f9fafb',
+      secondary: '#d1d5db',
     },
   },
   typography: {
     fontFamily: [
       'Inter var',
       'Inter',
-      'Roboto',
-      'Segoe UI',
-      'Arial',
+      '-apple-system',
+      'BlinkMacSystemFont',
       'sans-serif',
     ].join(','),
+    fontDisplay: 'swap',
   },
   shape: {
-    borderRadius: 12, // Increased border radius
+    borderRadius: 12,
   },
   components: {
     MuiButton: {
@@ -264,16 +201,8 @@ const darkTheme = createTheme({
           textTransform: 'none',
           borderRadius: 8,
           fontWeight: 500,
-          boxShadow: 'none',
           padding: '8px 16px',
-          '&:hover': {
-            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.2)',
-          },
-        },
-        containedPrimary: {
-          '&:hover': {
-            backgroundColor: '#2563eb',
-          },
+          transition: 'all 0.2s ease',
         },
       },
     },
@@ -282,173 +211,122 @@ const darkTheme = createTheme({
         root: {
           '& .MuiOutlinedInput-root': {
             borderRadius: 12,
+            transition: 'all 0.2s ease',
           },
-        },
-      },
-    },
-    MuiDialog: {
-      styleOverrides: {
-        paper: {
-          borderRadius: 16,
-          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2)',
-          backgroundColor: '#1f2937', // Updated to gray-800
-        },
-      },
-    },
-    MuiPaper: {
-      styleOverrides: {
-        root: {
-          borderRadius: 12,
-        },
-        elevation1: {
-          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.2)',
-        },
-      },
-    },
-    MuiAvatar: {
-      styleOverrides: {
-        root: {
-          border: '2px solid rgba(0, 0, 0, 0.8)',
         },
       },
     },
   },
 });
 
-// Protected route component
+// Optimized protected route component
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
 
-  // Show loading state while checking authentication
   if (loading) {
-    return <div className="loading-container">Loading...</div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+      </div>
+    );
   }
 
-  // Redirect to login if user is not authenticated
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  // Render the protected component
   return children;
 };
 
+// Error boundary fallback
+const ErrorFallback = ({ error, resetErrorBoundary }) => (
+  <div className="flex items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-900">
+    <div className="text-center p-8">
+      <div className="text-6xl mb-4">😵</div>
+      <h2 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2">
+        Oops! Something went wrong
+      </h2>
+      <p className="text-neutral-600 dark:text-neutral-400 mb-4">
+        {error.message || 'An unexpected error occurred'}
+      </p>
+      <button
+        onClick={resetErrorBoundary}
+        className="px-6 py-3 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+      >
+        Try again
+      </button>
+    </div>
+  </div>
+);
+
 function App() {
-  // State to track connection status
-  const [connectionStatus, setConnectionStatus] = useState('checking');
   const [darkMode, setDarkMode] = useState(false);
-  
-  // Determine the best API URL when the app starts
+
+  // Optimized theme initialization
   useEffect(() => {
-    setConnectionStatus('connecting');
-    determineApiUrl();
-    
-    // Add event listener to track online/offline status
-    const handleOnline = () => {
-      console.log('Device is online, rechecking connection');
-      setConnectionStatus('reconnecting');
-      determineApiUrl();
-    };
-    
-    const handleOffline = () => {
-      console.log('Device is offline');
-      setConnectionStatus('offline');
-    };
-    
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    
-    // Check connection status every 10 seconds
-    const intervalId = setInterval(() => {
-      const apiUrl = localStorage.getItem('api_url');
-      if (apiUrl) {
-        setConnectionStatus('connected');
-      }
-    }, 10000);
-    
-    // Check for theme preference
     const savedTheme = localStorage.getItem('theme');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    
     const isDarkMode = savedTheme === 'dark' || (!savedTheme && prefersDark);
     setDarkMode(isDarkMode);
     
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-      clearInterval(intervalId);
-    };
-  }, []);
-
-  // Listen for theme changes from ThemeToggle component
-  useEffect(() => {
     const handleThemeChange = () => {
       const savedTheme = localStorage.getItem('theme');
       setDarkMode(savedTheme === 'dark');
     };
     
     window.addEventListener('themechange', handleThemeChange);
-    
     return () => {
       window.removeEventListener('themechange', handleThemeChange);
     };
   }, []);
 
+  // Global error handler
+  const handleError = (error, errorInfo) => {
+    console.error('App error:', error, errorInfo);
+  };
   return (
-    <ThemeProvider theme={darkMode ? darkTheme : lightTheme}>
-      <CssBaseline />
-      <AuthProvider>
-        <SocketProvider>
-          <Router>
-            {/* Add the ServerConnectionFixer component to automatically fix connection issues */}
-            <ServerConnectionFixer />
-            
-            {connectionStatus === 'connecting' && (
-              <div className="alert alert-warning m-0 text-center rounded-0 fixed-top">
-                Connecting to server...
-              </div>
-            )}
-            {connectionStatus === 'offline' && (
-              <div className="alert alert-danger m-0 text-center rounded-0 fixed-top">
-                Device is offline. Please check your internet connection.
-              </div>
-            )}
-            
-            {/* Add Mobile Navigation - show on all routes except login/register */}
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route element={
-                <ProtectedRoute>
-                  <>
-                    <MobileNavigation />
-                    <AppLayout />
-                  </>
-                </ProtectedRoute>
-              }>
-                <Route path="/" element={<Chat />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/profile" element={<Profile />} />
-              </Route>
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-            
-            <ToastContainer 
-              position="top-center" 
-              autoClose={3000} 
-              hideProgressBar={false} 
-              newestOnTop 
-              closeOnClick
-              rtl={false}
-              pauseOnFocusLoss
-              draggable
-              pauseOnHover
-              className="toast-container-bootstrap"
-            />
-          </Router>
-        </SocketProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary FallbackComponent={ErrorFallback} onError={handleError}>
+      <ThemeProvider theme={darkMode ? darkTheme : lightTheme}>
+        <CssBaseline />
+        <AuthProvider>
+          <SocketProvider>
+            <Router>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route element={
+                  <ProtectedRoute>
+                    <>
+                      <MobileNavigation />
+                      <AppLayout />
+                    </>
+                  </ProtectedRoute>
+                }>
+                  <Route path="/" element={<Chat />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/profile" element={<Profile />} />
+                </Route>
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+              
+              <ToastContainer 
+                position="top-right" 
+                autoClose={3000} 
+                hideProgressBar={false} 
+                newestOnTop 
+                closeOnClick
+                pauseOnFocusLoss={false}
+                draggable
+                pauseOnHover
+                limit={3}
+                className="z-50"
+                toastClassName="backdrop-blur-sm"
+              />
+            </Router>
+          </SocketProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 

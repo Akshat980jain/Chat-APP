@@ -1,92 +1,100 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import io from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import { toast } from 'react-toastify';
 
-// Create context
+// Optimized socket context with better error handling
 const SocketContext = createContext();
 
 export const useSocket = () => useContext(SocketContext);
 
+// Connection state constants
+const CONNECTION_STATES = {
+  DISCONNECTED: 'disconnected',
+  CONNECTING: 'connecting',
+  CONNECTED: 'connected',
+  RECONNECTING: 'reconnecting',
+  ERROR: 'error'
+};
+
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
-  const [connected, setConnected] = useState(false);
+  const [connectionState, setConnectionState] = useState(CONNECTION_STATES.DISCONNECTED);
   const [connectionError, setConnectionError] = useState(null);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
-  const maxReconnectAttempts = 5;
+  const [lastConnectTime, setLastConnectTime] = useState(0);
+  
+  const maxReconnectAttempts = 3;
+  const reconnectDelay = 2000;
+  
   const { user, detectApiUrl } = useAuth();
   const reconnectTimeoutRef = useRef(null);
   const connectionInProgress = useRef(false);
   const socketRef = useRef(null);
   const heartbeatIntervalRef = useRef(null);
+  const messageQueueRef = useRef([]);
   
-  // Handle socket reconnection with backoff
+  // Computed connection status
+  const isConnected = connectionState === CONNECTION_STATES.CONNECTED;
+  
+  // Optimized reconnection with exponential backoff
   const reconnectSocket = useCallback(() => {
-    // Prevent multiple reconnection attempts running simultaneously
     if (connectionInProgress.current) {
-      console.log('Connection attempt already in progress, skipping...');
       return;
     }
     
     if (reconnectAttempts >= maxReconnectAttempts) {
-      console.log(`Maximum reconnection attempts (${maxReconnectAttempts}) reached. Stopping reconnection.`);
-      setConnectionError('Unable to connect to chat server. Please refresh the page or check your connection.');
+      setConnectionState(CONNECTION_STATES.ERROR);
+      setConnectionError('Unable to connect to chat server.');
+      toast.error('Connection failed. Please refresh the page.');
       return;
     }
     
-    // Clear any existing timeout
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
     
-    // Set flag to indicate reconnection in progress
     connectionInProgress.current = true;
+    setConnectionState(CONNECTION_STATES.RECONNECTING);
     
-    // Calculate backoff time
-    const backoffTime = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
-    
-    console.log(`Scheduling reconnect attempt ${reconnectAttempts + 1} in ${backoffTime/1000} seconds`);
+    const backoffTime = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts), 10000);
     
     reconnectTimeoutRef.current = setTimeout(() => {
-      console.log(`Attempting to reconnect socket (attempt ${reconnectAttempts + 1})`);
-      
       if (socketRef.current) {
         try {
           socketRef.current.connect();
           setReconnectAttempts(prev => prev + 1);
         } catch (error) {
           console.error('Error reconnecting socket:', error);
+          setConnectionState(CONNECTION_STATES.ERROR);
         }
       }
       
-      // Reset the flag after attempt
       connectionInProgress.current = false;
     }, backoffTime);
   }, [reconnectAttempts, maxReconnectAttempts]);
   
-  // Initialize socket connection
+  // Optimized socket initialization
   const initializeSocket = useCallback(() => {
     if (!user) return null;
     
     try {
-      // Get the current API URL using the improved function
       const socketUrl = detectApiUrl();
-      console.log('Connecting to socket at:', socketUrl);
       
-      // Create a new socket connection
       const newSocket = io(socketUrl, {
-        reconnection: false, // We'll handle reconnection manually
+        reconnection: false,
         timeout: 20000,
-        transports: ['websocket', 'polling'], // Try websocket first, then fallback to polling
-        upgrade: true, // Allow transport upgrade
-        rememberUpgrade: true, // Remember if websocket works
-        autoConnect: true, // Connect automatically
-        forceNew: true, // Force a new connection
+        transports: ['websocket', 'polling'],
+        upgrade: true,
+        rememberUpgrade: true,
+        autoConnect: true,
+        forceNew: true,
         auth: {
           token: localStorage.getItem('token')
         },
         query: {
-          userId: user.id, // Add user ID to query for quick identification
+          userId: user.id,
           device: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
         }
       });
@@ -94,12 +102,13 @@ export const SocketProvider = ({ children }) => {
       return newSocket;
     } catch (error) {
       console.error('Error initializing socket:', error);
-      setConnectionError('Failed to initialize socket connection');
+      setConnectionState(CONNECTION_STATES.ERROR);
+      setConnectionError('Failed to initialize connection');
       return null;
     }
   }, [user, detectApiUrl]);
   
-  // Clean up existing socket and timers
+  // Optimized cleanup function
   const cleanupSocket = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
@@ -112,49 +121,54 @@ export const SocketProvider = ({ children }) => {
     }
     
     if (socketRef.current) {
-      console.log('Cleaning up socket connection');
       socketRef.current.removeAllListeners();
       socketRef.current.disconnect();
       socketRef.current = null;
     }
+    
+    connectionInProgress.current = false;
   }, []);
   
-  // Set up socket and event listeners
+  // Optimized socket setup
   useEffect(() => {
     if (!user) {
       cleanupSocket();
+      setConnectionState(CONNECTION_STATES.DISCONNECTED);
       return;
     }
     
-    // Reset connection state when user changes
-    setConnected(false);
+    setConnectionState(CONNECTION_STATES.CONNECTING);
     setConnectionError(null);
     setReconnectAttempts(0);
     connectionInProgress.current = false;
     
-    // Clean up previous socket
     cleanupSocket();
     
-    // Create a new socket
     const newSocket = initializeSocket();
     if (!newSocket) return;
     
-    // Save reference to the socket
     socketRef.current = newSocket;
     setSocket(newSocket);
     
-    // Set up event listeners
+    // Optimized event listeners
     newSocket.on('connect', () => {
-      console.log('Socket connected successfully');
-      setConnected(true);
+      setConnectionState(CONNECTION_STATES.CONNECTED);
       setConnectionError(null);
       setReconnectAttempts(0);
       connectionInProgress.current = false;
+      setLastConnectTime(Date.now());
       
-      // Identify user to server
       newSocket.emit('user_connected', user.id);
       
-      // Set up heartbeat to keep connection alive and detect stale connections
+      // Process queued messages
+      if (messageQueueRef.current.length > 0) {
+        messageQueueRef.current.forEach(message => {
+          newSocket.emit('send_message', message);
+        });
+        messageQueueRef.current = [];
+      }
+      
+      // Setup heartbeat
       if (heartbeatIntervalRef.current) {
         clearInterval(heartbeatIntervalRef.current);
       }
@@ -166,129 +180,88 @@ export const SocketProvider = ({ children }) => {
           clearInterval(heartbeatIntervalRef.current);
           heartbeatIntervalRef.current = null;
         }
-      }, 30000); // Send heartbeat every 30 seconds
+      }, 25000);
     });
     
     newSocket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
-      setConnected(false);
+      setConnectionState(CONNECTION_STATES.ERROR);
       
-      // Only show error after multiple attempts
-      if (reconnectAttempts > 2) {
-        setConnectionError('Having trouble connecting to chat server...');
+      if (reconnectAttempts > 1) {
+        setConnectionError('Connection issues detected');
       }
       
       if (reconnectAttempts < maxReconnectAttempts) {
         reconnectSocket();
+      } else {
+        toast.error('Unable to connect to chat server');
       }
     });
     
     newSocket.on('disconnect', (reason) => {
-      console.log('Socket disconnected, reason:', reason);
-      setConnected(false);
+      setConnectionState(CONNECTION_STATES.DISCONNECTED);
       
-      // Clear heartbeat interval
       if (heartbeatIntervalRef.current) {
         clearInterval(heartbeatIntervalRef.current);
         heartbeatIntervalRef.current = null;
       }
       
-      // If the disconnection was initiated by the server, try to reconnect
-      if (reason === 'io server disconnect' || reason === 'transport close' || reason === 'ping timeout') {
+      // Auto-reconnect for certain disconnect reasons
+      if (['io server disconnect', 'transport close', 'ping timeout'].includes(reason)) {
         if (reconnectAttempts < maxReconnectAttempts) {
           reconnectSocket();
         }
       }
     });
     
-    // Call-related events
-    newSocket.on('incoming_call', (data) => {
-      console.log('Incoming call:', data);
-    });
-    
-    newSocket.on('call_accepted', (data) => {
-      console.log('Call accepted:', data);
-    });
-    
-    newSocket.on('call_rejected', (data) => {
-      console.log('Call rejected:', data);
-    });
-    
-    newSocket.on('call_ended', (data) => {
-      console.log('Call ended:', data);
-    });
-    
-    newSocket.on('call_offer', (data) => {
-      console.log('Call offer received:', data);
-    });
-    
-    newSocket.on('call_answer', (data) => {
-      console.log('Call answer received:', data);
-    });
-    
-    newSocket.on('ice_candidate', (data) => {
-      console.log('ICE candidate received:', data);
-    });
-    
-    // Error handling
     newSocket.on('error', (error) => {
       console.error('Socket error:', error);
-      setConnectionError('Socket error: ' + (error.message || 'Unknown error'));
+      setConnectionState(CONNECTION_STATES.ERROR);
+      setConnectionError(error.message || 'Unknown error');
     });
     
-    // Cleanup socket connection on unmount
     return cleanupSocket;
   }, [user, reconnectSocket, initializeSocket, cleanupSocket, maxReconnectAttempts]);
   
-  // Join a room (e.g., a chat)
+  // Optimized room management
   const joinRoom = useCallback((roomId) => {
-    if (socket && connected && roomId) {
-      console.log(`Joining room: ${roomId}`);
+    if (socket && isConnected && roomId) {
       socket.emit('join_room', roomId);
-    } else {
-      console.warn('Cannot join room - socket not connected or no room ID');
     }
-  }, [socket, connected]);
+  }, [socket, isConnected]);
   
-  // Leave a room
   const leaveRoom = useCallback((roomId) => {
-    if (socket && connected && roomId) {
-      console.log(`Leaving room: ${roomId}`);
+    if (socket && isConnected && roomId) {
       socket.emit('leave_room', roomId);
     }
-  }, [socket, connected]);
+  }, [socket, isConnected]);
   
-  // Emit a custom event
+  // Optimized event emission with queuing
   const emitEvent = useCallback((event, data) => {
-    if (socket && connected) {
-      console.log(`Emitting event: ${event}`, data);
+    if (socket && isConnected) {
       socket.emit(event, data);
       return true;
     } else {
-      console.warn(`Cannot emit event: ${event} - socket not connected`);
+      // Queue message for later if it's a send_message event
+      if (event === 'send_message') {
+        messageQueueRef.current.push(data);
+      }
       return false;
     }
-  }, [socket, connected]);
+  }, [socket, isConnected]);
   
-  // A function to update the socket connection when the API URL changes
+  // Optimized connection update
   const updateSocketConnection = useCallback(() => {
-    console.log('Updating socket connection');
-    
-    // Clean up previous socket
     cleanupSocket();
-    
-    // Reset connection state
-    setConnected(false);
+    setConnectionState(CONNECTION_STATES.CONNECTING);
     setConnectionError(null);
     setReconnectAttempts(0);
     connectionInProgress.current = false;
     
-    // Create a new socket with the updated URL
     const newSocket = initializeSocket();
     if (newSocket) {
       socketRef.current = newSocket;
       setSocket(newSocket);
-      console.log('Socket connection updated');
     }
   }, [initializeSocket, cleanupSocket]);
   
@@ -296,12 +269,16 @@ export const SocketProvider = ({ children }) => {
     <SocketContext.Provider
       value={{
         socket,
-        connected,
+        isConnected,
+        connectionState,
         connectionError,
+        reconnectAttempts,
+        maxReconnectAttempts,
         updateSocketConnection,
         joinRoom,
         leaveRoom,
-        emitEvent
+        emitEvent,
+        messageQueue: messageQueueRef.current
       }}
     >
       {children}

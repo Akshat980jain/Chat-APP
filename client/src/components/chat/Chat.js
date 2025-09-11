@@ -1,554 +1,276 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { 
-  Container, 
-  Grid, 
-  Paper, 
-  Typography, 
-  TextField, 
-  Button, 
-  List, 
-  ListItem, 
-  ListItemText, 
-  ListItemAvatar, 
-  Avatar, 
-  Box, 
-  Tabs, 
-  Tab, 
-  Badge,
-  IconButton,
-  Tooltip,
-  Chip,
-  Divider,
-  Alert,
-  Collapse,
-  Fade,
-  Slide,
-  useTheme,
-  useMediaQuery,
-  CircularProgress,
-  Skeleton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Menu,
-  MenuItem,
-  ListItemIcon,
-  Snackbar,
-  AppBar,
-  Toolbar
-} from '@mui/material';
-import {
-  Send as SendIcon,
-  Add as AddIcon,
-  Search as SearchIcon,
-  MoreVert as MoreVertIcon,
-  Phone as PhoneIcon,
-  VideoCall as VideoCallIcon,
-  Info as InfoIcon,
-  Close as CloseIcon,
-  ArrowBack as ArrowBackIcon,
-  EmojiEmotions as EmojiIcon,
-  AttachFile as AttachFileIcon,
-  Mic as MicIcon,
-  Image as ImageIcon,
-  Delete as DeleteIcon,
-  Edit as EditIcon,
-  Reply as ReplyIcon,
-  Forward as ForwardIcon,
-  Star as StarIcon,
-  StarBorder as StarBorderIcon,
-  Refresh as RefreshIcon,
-  Settings as SettingsIcon,
-  Notifications as NotificationsIcon,
-  NotificationsOff as NotificationsOffIcon,
-  VolumeUp as VolumeUpIcon,
-  VolumeOff as VolumeOffIcon,
-  Brightness4 as DarkModeIcon,
-  Brightness7 as LightModeIcon,
-  PersonAdd as PersonAddIcon,
-  Group as GroupIcon,
-  FilterList as FilterIcon,
-  Sort as SortIcon,
-  CheckCircle as CheckCircleIcon,
-  Schedule as ScheduleIcon,
-  Done as DoneIcon,
-  DoneAll as DoneAllIcon,
-  Error as ErrorIcon,
-  Warning as WarningIcon,
-  WifiOff as WifiOffIcon,
-  Wifi as WifiIcon,
-  SignalWifi4Bar as SignalIcon,
-  Battery20 as BatteryLowIcon,
-  BatteryFull as BatteryFullIcon,
-  NetworkCheck as NetworkIcon
-} from '@mui/icons-material';
-import { formatDistanceToNow, format, isToday, isYesterday } from 'date-fns';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
-import axios from 'axios';
 import { toast } from 'react-toastify';
-import AddChatByPhone from './AddChatByPhone';
-import ChatInputMobile from './ChatInputMobile';
-import MessageBubble from './MessageBubble';
-import TypingIndicator from './TypingIndicator';
+import axios from 'axios';
+import { formatDistanceToNow } from 'date-fns';
 import ProfilePicture from '../profile/ProfilePicture';
-import IncomingCallAlert from '../call/IncomingCallAlert';
-import CallModal from '../call/CallModal';
+import MessageInput from './MessageInput';
+import TypingIndicator from './TypingIndicator';
+import AddChatByPhone from './AddChatByPhone';
 
-// Enhanced utility functions
-const getImageUrl = (url) => {
-  if (!url) return null;
-  if (url.startsWith('http')) return url;
-  const apiUrl = localStorage.getItem('api_url') || process.env.REACT_APP_API_URL || 'http://localhost:5000';
-  return url.startsWith('/') ? `${apiUrl}${url}` : `${apiUrl}/${url}`;
-};
+// Performance optimizations
+const MESSAGES_PER_PAGE = 50;
+const DEBOUNCE_DELAY = 300;
+const TYPING_TIMEOUT = 1000;
 
-const formatMessageTime = (timestamp) => {
-  if (!timestamp) return '';
-  
-  try {
-    const date = new Date(timestamp);
-    const now = new Date();
-    
-    if (isToday(date)) {
-      return format(date, 'HH:mm');
-    } else if (isYesterday(date)) {
-      return 'Yesterday';
-    } else if (now.getTime() - date.getTime() < 7 * 24 * 60 * 60 * 1000) {
-      return format(date, 'EEE');
-    } else {
-      return format(date, 'MMM d');
-    }
-  } catch (error) {
-    console.error('Error formatting time:', error);
-    return '';
-  }
-};
-
-const generateMessageId = () => {
-  return `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-};
-
-// Enhanced Chat Component
 const Chat = () => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const isTablet = useMediaQuery(theme.breakpoints.between('md', 'lg'));
-  
   // Core state
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
-  const [selectedUser, setSelectedUser] = useState(null);
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   
   // UI state
-  const [activeTab, setActiveTab] = useState(0);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('chats');
   const [mobileView, setMobileView] = useState('chats');
-  const [showAddChat, setShowAddChat] = useState(false);
-  const [showUserInfo, setShowUserInfo] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showAddChatModal, setShowAddChatModal] = useState(false);
   
-  // Loading and error states
-  const [loading, setLoading] = useState(true);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [loadingUsers, setLoadingUsers] = useState(false);
-  const [error, setError] = useState(null);
-  const [connectionError, setConnectionError] = useState(null);
-  
-  // Message state
-  const [sendingMessage, setSendingMessage] = useState(false);
+  // Performance state
   const [typingUsers, setTypingUsers] = useState(new Set());
-  const [messageQueue, setMessageQueue] = useState([]);
-  const [unreadCounts, setUnreadCounts] = useState({});
-  
-  // Call state
-  const [incomingCall, setIncomingCall] = useState(null);
-  const [currentCall, setCurrentCall] = useState(null);
-  const [callStatus, setCallStatus] = useState('idle');
-  
-  // Advanced state
-  const [messageFilter, setMessageFilter] = useState('all');
-  const [sortOrder, setSortOrder] = useState('newest');
-  const [selectedMessages, setSelectedMessages] = useState(new Set());
-  const [showMessageActions, setShowMessageActions] = useState(false);
-  const [replyingTo, setReplyingTo] = useState(null);
-  const [editingMessage, setEditingMessage] = useState(null);
+  const [onlineUsers, setOnlineUsers] = useState(new Set());
+  const [messageCache, setMessageCache] = useState(new Map());
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [messagesPage, setMessagesPage] = useState(1);
   
   // Refs
   const messagesEndRef = useRef(null);
-  const messageInputRef = useRef(null);
-  const chatContainerRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
-  const lastMessageRef = useRef(null);
-  const retryTimeoutRef = useRef(null);
+  const messageInputRef = useRef(null);
+  const abortControllerRef = useRef(null);
   
-  // Context
-  const { user, detectApiUrl } = useAuth();
-  const { socket, connected: socketConnected } = useSocket();
+  const { user } = useAuth();
+  const { socket, connected: isConnected } = useSocket();
+  const isMobile = window.innerWidth <= 768;
 
-  // Memoized values
-  const apiUrl = useMemo(() => detectApiUrl(), [detectApiUrl]);
-  
+  // Memoized API URL
+  const apiUrl = useMemo(() => {
+    return localStorage.getItem('api_url') || process.env.REACT_APP_API_URL || 'http://localhost:5000';
+  }, []);
+
+  // Memoized filtered chats
   const filteredChats = useMemo(() => {
     if (!searchQuery) return chats;
     
     return chats.filter(chat => {
       const otherUser = chat.participants?.find(p => p._id !== user?.id);
-      const chatName = chat.isGroup ? chat.groupName : otherUser?.name;
-      const lastMessageContent = chat.lastMessage?.content || '';
-      
-      return (
-        chatName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        lastMessageContent.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+      return otherUser?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+             chat.lastMessage?.content?.toLowerCase().includes(searchQuery.toLowerCase());
     });
   }, [chats, searchQuery, user?.id]);
-  
+
+  // Memoized filtered users
   const filteredUsers = useMemo(() => {
     if (!searchQuery) return users;
     
     return users.filter(u => 
       u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.phoneNumber?.includes(searchQuery)
+      u.email?.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [users, searchQuery]);
 
-  const sortedMessages = useMemo(() => {
-    const sorted = [...messages];
-    
-    if (sortOrder === 'newest') {
-      return sorted.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    } else {
-      return sorted.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  // Optimized API request function
+  const makeApiRequest = useCallback(async (url, options = {}) => {
+    // Cancel previous request if still pending
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
-  }, [messages, sortOrder]);
+    
+    abortControllerRef.current = new AbortController();
+    
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios({
+        url: `${apiUrl}${url}`,
+        signal: abortControllerRef.current.signal,
+        timeout: 10000,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...options.headers
+        },
+        ...options
+      });
+      
+      return response.data;
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log('Request aborted');
+        return null;
+      }
+      throw error;
+    }
+  }, [apiUrl]);
 
-  // Enhanced API functions with better error handling
+  // Optimized fetch chats
   const fetchChats = useCallback(async () => {
     if (!user?.id) return;
     
     try {
       setLoading(true);
-      setError(null);
+      setError('');
       
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-
-      const response = await axios.get(`${apiUrl}/api/chats`, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 10000
-      });
-
-      if (response.data) {
-        setChats(response.data);
-        
-        // Calculate unread counts
-        const counts = {};
-        response.data.forEach(chat => {
-          const unreadCount = chat.unreadCounts?.[user.id] || 0;
-          if (unreadCount > 0) {
-            counts[chat._id] = unreadCount;
-          }
-        });
-        setUnreadCounts(counts);
+      const data = await makeApiRequest('/api/chats');
+      if (data) {
+        setChats(data);
       }
     } catch (error) {
       console.error('Error fetching chats:', error);
-      setError('Failed to load chats. Please try again.');
-      
-      if (error.response?.status === 401) {
-        toast.error('Session expired. Please log in again.');
-      }
+      setError('Failed to load chats');
+      toast.error('Failed to load chats');
     } finally {
       setLoading(false);
     }
-  }, [user?.id, apiUrl]);
+  }, [user?.id, makeApiRequest]);
 
+  // Optimized fetch users
   const fetchUsers = useCallback(async () => {
     if (!user?.id) return;
     
     try {
-      setLoadingUsers(true);
-      
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${apiUrl}/api/users`, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 8000
-      });
-
-      if (response.data) {
-        setUsers(response.data);
+      const data = await makeApiRequest('/api/users');
+      if (data) {
+        setUsers(data);
       }
     } catch (error) {
       console.error('Error fetching users:', error);
-      toast.error('Failed to load users');
-    } finally {
-      setLoadingUsers(false);
+      setError('Failed to load users');
     }
-  }, [user?.id, apiUrl]);
+  }, [user?.id, makeApiRequest]);
 
-  const fetchMessages = useCallback(async (userId) => {
-    if (!userId || !user?.id) return;
+  // Optimized fetch messages with pagination
+  const fetchMessages = useCallback(async (chatId, page = 1, append = false) => {
+    if (!chatId || !user?.id) return;
+    
+    // Check cache first
+    const cacheKey = `${chatId}-${page}`;
+    if (messageCache.has(cacheKey) && !append) {
+      setMessages(messageCache.get(cacheKey));
+      return;
+    }
     
     try {
-      setLoadingMessages(true);
+      setMessagesLoading(true);
       
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${apiUrl}/api/messages/${userId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 10000
-      });
-
-      if (response.data) {
-        setMessages(response.data);
+      const otherUser = selectedChat?.participants?.find(p => p._id !== user.id);
+      if (!otherUser) return;
+      
+      const data = await makeApiRequest(`/api/messages/${otherUser._id}?page=${page}&limit=${MESSAGES_PER_PAGE}`);
+      
+      if (data) {
+        const newMessages = Array.isArray(data) ? data : data.messages || [];
         
-        // Mark messages as read
-        const unreadMessages = response.data.filter(
-          msg => msg.sender._id === userId && msg.status !== 'read'
-        );
+        // Cache the messages
+        messageCache.set(cacheKey, newMessages);
         
-        if (unreadMessages.length > 0) {
-          await markMessagesAsRead(unreadMessages.map(msg => msg._id));
+        if (append && page > 1) {
+          setMessages(prev => [...newMessages, ...prev]);
+        } else {
+          setMessages(newMessages);
         }
+        
+        setHasMoreMessages(newMessages.length === MESSAGES_PER_PAGE);
       }
     } catch (error) {
       console.error('Error fetching messages:', error);
       setError('Failed to load messages');
     } finally {
-      setLoadingMessages(false);
+      setMessagesLoading(false);
     }
-  }, [user?.id, apiUrl]);
+  }, [user?.id, selectedChat, makeApiRequest, messageCache]);
 
-  const markMessagesAsRead = useCallback(async (messageIds) => {
-    if (!messageIds.length) return;
+  // Optimized send message
+  const sendMessage = useCallback(async (content) => {
+    if (!content?.trim() || !selectedChat || !user?.id) return;
     
-    try {
-      const token = localStorage.getItem('token');
-      
-      // Update each message status
-      await Promise.all(
-        messageIds.map(messageId =>
-          axios.put(
-            `${apiUrl}/api/messages/${messageId}/status`,
-            { status: 'read' },
-            { headers: { Authorization: `Bearer ${token}` } }
-          )
-        )
-      );
-      
-      // Update local state
-      setMessages(prev => 
-        prev.map(msg => 
-          messageIds.includes(msg._id) 
-            ? { ...msg, status: 'read' }
-            : msg
-        )
-      );
-      
-      // Emit socket event for real-time updates
-      if (socket && socketConnected) {
-        messageIds.forEach(messageId => {
-          socket.emit('message_read', {
-            messageId,
-            userId: user.id,
-            chatId: selectedChat?._id
-          });
-        });
-      }
-    } catch (error) {
-      console.error('Error marking messages as read:', error);
-    }
-  }, [apiUrl, socket, socketConnected, user?.id, selectedChat?._id]);
-
-  // Enhanced message sending with retry logic
-  const sendMessage = useCallback(async (content, recipientId = null, retryCount = 0) => {
-    if (!content?.trim() || sendingMessage) return;
+    const otherUser = selectedChat.participants?.find(p => p._id !== user.id);
+    if (!otherUser) return;
     
-    const recipient = recipientId || selectedUser?._id;
-    if (!recipient) {
-      toast.error('No recipient selected');
-      return;
-    }
-
-    const messageId = generateMessageId();
-    const tempMessage = {
-      _id: `temp-${Date.now()}`,
-      messageId,
-      sender: { _id: user.id, name: user.name, profilePicture: user.profilePicture },
-      recipient: { _id: recipient },
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Optimistic UI update
+    const optimisticMessage = {
+      _id: tempId,
+      sender: {
+        _id: user.id,
+        name: user.name,
+        profilePicture: user.profilePicture
+      },
+      recipient: {
+        _id: otherUser._id
+      },
       content: content.trim(),
       createdAt: new Date().toISOString(),
       status: 'sending',
-      isTemporary: true
+      tempId
     };
-
+    
+    setMessages(prev => [...prev, optimisticMessage]);
+    setNewMessage('');
+    
+    // Scroll to bottom
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+    
     try {
-      setSendingMessage(true);
-      
-      // Add optimistic message
-      setMessages(prev => [...prev, tempMessage]);
-      setNewMessage('');
-      
-      // Scroll to bottom
-      setTimeout(() => scrollToBottom(), 100);
-
       // Send via socket first for real-time delivery
-      if (socket && socketConnected) {
+      if (socket && isConnected) {
         socket.emit('send_message', {
+          tempId,
           messageId,
+          chatId: selectedChat._id,
+          recipientId: otherUser._id,
           senderId: user.id,
-          recipientId: recipient,
           content: content.trim(),
-          chatId: selectedChat?._id,
-          tempId: tempMessage._id,
-          timestamp: tempMessage.createdAt
+          timestamp: new Date().toISOString()
         });
       }
-
-      // Also send via HTTP API for persistence
-      const token = localStorage.getItem('token');
-      const response = await axios.post(
-        `${apiUrl}/api/messages`,
-        {
-          recipient,
+      
+      // Also send via API for persistence
+      const data = await makeApiRequest('/api/messages', {
+        method: 'POST',
+        data: {
+          recipient: otherUser._id,
           content: content.trim(),
           messageId
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 15000
         }
-      );
-
-      if (response.data) {
-        // Replace temporary message with real one
-        setMessages(prev => 
-          prev.map(msg => 
-            msg._id === tempMessage._id 
-              ? { ...response.data, status: 'sent' }
-              : msg
-          )
-        );
+      });
+      
+      if (data) {
+        // Update the optimistic message with real data
+        setMessages(prev => prev.map(msg => 
+          msg.tempId === tempId ? { ...data, status: 'sent' } : msg
+        ));
         
-        // Refresh chats to update last message
+        // Update chat list
         fetchChats();
       }
     } catch (error) {
       console.error('Error sending message:', error);
       
-      // Handle retry logic
-      if (retryCount < 3) {
-        console.log(`Retrying message send (attempt ${retryCount + 1})`);
-        setTimeout(() => {
-          sendMessage(content, recipientId, retryCount + 1);
-        }, 1000 * (retryCount + 1));
-        return;
-      }
+      // Update message status to failed
+      setMessages(prev => prev.map(msg => 
+        msg.tempId === tempId ? { ...msg, status: 'failed' } : msg
+      ));
       
-      // Mark message as failed
-      setMessages(prev => 
-        prev.map(msg => 
-          msg._id === tempMessage._id 
-            ? { ...msg, status: 'failed' }
-            : msg
-        )
-      );
-      
-      toast.error('Failed to send message. Please try again.');
-    } finally {
-      setSendingMessage(false);
+      toast.error('Failed to send message');
     }
-  }, [
-    sendingMessage, 
-    selectedUser?._id, 
-    user, 
-    socket, 
-    socketConnected, 
-    selectedChat?._id, 
-    apiUrl, 
-    fetchChats
-  ]);
+  }, [selectedChat, user, socket, isConnected, makeApiRequest, fetchChats]);
 
-  // Enhanced chat selection
-  const handleChatSelect = useCallback(async (chat, user = null) => {
-    try {
-      setSelectedChat(chat);
-      setSelectedUser(user || chat.participants?.find(p => p._id !== user?.id));
-      setMessages([]);
-      setError(null);
-      
-      if (isMobile) {
-        setMobileView('chat');
-      }
-      
-      // Join socket room for real-time updates
-      if (socket && chat._id) {
-        socket.emit('join_chat', chat._id);
-      }
-      
-      // Fetch messages for this chat
-      const otherUser = user || chat.participants?.find(p => p._id !== user?.id);
-      if (otherUser?._id) {
-        await fetchMessages(otherUser._id);
-      }
-      
-      // Clear unread count for this chat
-      if (unreadCounts[chat._id]) {
-        setUnreadCounts(prev => {
-          const updated = { ...prev };
-          delete updated[chat._id];
-          return updated;
-        });
-      }
-    } catch (error) {
-      console.error('Error selecting chat:', error);
-      setError('Failed to load chat');
-    }
-  }, [isMobile, socket, fetchMessages, unreadCounts, user?.id]);
-
-  // Enhanced user selection for new chats
-  const handleUserSelect = useCallback(async (selectedUser) => {
-    try {
-      // Check if chat already exists
-      const existingChat = chats.find(chat => 
-        chat.participants?.some(p => p._id === selectedUser._id)
-      );
-      
-      if (existingChat) {
-        handleChatSelect(existingChat, selectedUser);
-        return;
-      }
-      
-      // Create new chat
-      const token = localStorage.getItem('token');
-      const response = await axios.post(
-        `${apiUrl}/api/chats`,
-        { participantId: selectedUser._id },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (response.data) {
-        const newChat = response.data;
-        setChats(prev => [newChat, ...prev]);
-        handleChatSelect(newChat, selectedUser);
-        toast.success(`Started chat with ${selectedUser.name}`);
-      }
-    } catch (error) {
-      console.error('Error creating chat:', error);
-      toast.error('Failed to start chat');
-    }
-  }, [chats, handleChatSelect, apiUrl]);
-
-  // Enhanced typing indicator
+  // Optimized typing handler
   const handleTyping = useCallback(() => {
-    if (!socket || !socketConnected || !selectedUser?._id) return;
+    if (!socket || !isConnected || !selectedChat) return;
+    
+    const otherUser = selectedChat.participants?.find(p => p._id !== user?.id);
+    if (!otherUser) return;
     
     // Clear existing timeout
     if (typingTimeoutRef.current) {
@@ -557,1229 +279,702 @@ const Chat = () => {
     
     // Emit typing start
     socket.emit('typing_start', {
-      recipientId: selectedUser._id,
-      chatId: selectedChat?._id
+      chatId: selectedChat._id,
+      recipientId: otherUser._id
     });
     
     // Set timeout to stop typing
     typingTimeoutRef.current = setTimeout(() => {
       socket.emit('typing_end', {
-        recipientId: selectedUser._id,
-        chatId: selectedChat?._id
+        chatId: selectedChat._id,
+        recipientId: otherUser._id
       });
-    }, 1000);
-  }, [socket, socketConnected, selectedUser?._id, selectedChat?._id]);
+    }, TYPING_TIMEOUT);
+  }, [socket, isConnected, selectedChat, user?.id]);
 
-  // Scroll to bottom function
-  const scrollToBottom = useCallback(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ 
-        behavior: 'smooth',
-        block: 'end'
-      });
-    }
-  }, []);
+  // Debounced search
+  const debouncedSearch = useCallback(
+    debounce((query) => {
+      setSearchQuery(query);
+    }, DEBOUNCE_DELAY),
+    []
+  );
 
   // Socket event handlers
   useEffect(() => {
-    if (!socket) return;
-
+    if (!socket || !isConnected) return;
+    
     const handleReceiveMessage = (messageData) => {
       console.log('Received message via socket:', messageData);
       
-      // Add message to current chat if it matches
-      if (
-        selectedUser && 
-        (messageData.sender._id === selectedUser._id || messageData.recipient._id === selectedUser._id)
-      ) {
+      // Add to messages if it's for the current chat
+      if (selectedChat && (
+        messageData.chatId === selectedChat._id ||
+        (messageData.sender._id === selectedChat.participants?.find(p => p._id !== user?.id)?._id)
+      )) {
         setMessages(prev => {
-          // Check for duplicates
+          // Avoid duplicates
           const exists = prev.some(msg => 
             msg._id === messageData._id || 
-            msg.messageId === messageData.messageId
+            msg.tempId === messageData.tempId
           );
           
           if (exists) return prev;
-          
           return [...prev, messageData];
         });
         
-        // Auto-scroll to new message
-        setTimeout(scrollToBottom, 100);
-        
-        // Mark as read if chat is active
-        if (messageData.sender._id === selectedUser._id) {
-          setTimeout(() => {
-            markMessagesAsRead([messageData._id]);
-          }, 500);
-        }
+        // Scroll to bottom
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
       }
       
       // Update chat list
       fetchChats();
-      
-      // Show notification if not in current chat
-      if (!selectedUser || messageData.sender._id !== selectedUser._id) {
-        showNotification(messageData);
-      }
     };
-
+    
     const handleTypingIndicator = (data) => {
       const { userId, isTyping } = data;
       
       setTypingUsers(prev => {
-        const updated = new Set(prev);
+        const newSet = new Set(prev);
         if (isTyping) {
-          updated.add(userId);
+          newSet.add(userId);
         } else {
-          updated.delete(userId);
+          newSet.delete(userId);
         }
-        return updated;
+        return newSet;
       });
-      
-      // Clear typing indicator after 3 seconds
-      if (isTyping) {
-        setTimeout(() => {
-          setTypingUsers(prev => {
-            const updated = new Set(prev);
-            updated.delete(userId);
-            return updated;
-          });
-        }, 3000);
-      }
     };
-
+    
     const handleUserStatus = (data) => {
       const { userId, status } = data;
       
-      // Update user status in chats
-      setChats(prev => 
-        prev.map(chat => ({
-          ...chat,
-          participants: chat.participants?.map(p => 
-            p._id === userId 
-              ? { ...p, isOnline: status === 'online' }
-              : p
-          )
-        }))
-      );
+      setOnlineUsers(prev => {
+        const newSet = new Set(prev);
+        if (status === 'online') {
+          newSet.add(userId);
+        } else {
+          newSet.delete(userId);
+        }
+        return newSet;
+      });
       
-      // Update user status in users list
-      setUsers(prev => 
-        prev.map(u => 
-          u._id === userId 
-            ? { ...u, isOnline: status === 'online' }
-            : u
-        )
-      );
+      // Update users list
+      setUsers(prev => prev.map(u => 
+        u._id === userId ? { ...u, isOnline: status === 'online' } : u
+      ));
     };
-
+    
     const handleMessageDelivered = (data) => {
-      const { tempId, status, messageId } = data;
+      const { tempId, status } = data;
       
-      setMessages(prev => 
-        prev.map(msg => 
-          msg._id === tempId 
-            ? { ...msg, status, _id: messageId || msg._id }
-            : msg
-        )
-      );
+      setMessages(prev => prev.map(msg => 
+        msg.tempId === tempId ? { ...msg, status } : msg
+      ));
     };
-
-    const handleMessageError = (data) => {
-      const { tempId, error } = data;
-      
-      setMessages(prev => 
-        prev.map(msg => 
-          msg._id === tempId 
-            ? { ...msg, status: 'failed' }
-            : msg
-        )
-      );
-      
-      toast.error(`Message failed: ${error}`);
-    };
-
-    const handleIncomingCall = (callData) => {
-      console.log('Incoming call:', callData);
-      setIncomingCall(callData);
-      setCallStatus('incoming');
-    };
-
-    const handleCallAccepted = (callData) => {
-      console.log('Call accepted:', callData);
-      setCurrentCall(callData);
-      setCallStatus('ongoing');
-      setIncomingCall(null);
-    };
-
-    const handleCallRejected = (callData) => {
-      console.log('Call rejected:', callData);
-      setIncomingCall(null);
-      setCurrentCall(null);
-      setCallStatus('idle');
-      toast.info('Call was declined');
-    };
-
-    const handleCallEnded = (callData) => {
-      console.log('Call ended:', callData);
-      setIncomingCall(null);
-      setCurrentCall(null);
-      setCallStatus('idle');
-    };
-
-    // Register socket event listeners
+    
+    // Register socket listeners
     socket.on('receive_message', handleReceiveMessage);
     socket.on('typing_indicator', handleTypingIndicator);
     socket.on('user_status', handleUserStatus);
     socket.on('message_delivered', handleMessageDelivered);
-    socket.on('message_error', handleMessageError);
-    socket.on('incoming_call', handleIncomingCall);
-    socket.on('call_accepted', handleCallAccepted);
-    socket.on('call_rejected', handleCallRejected);
-    socket.on('call_ended', handleCallEnded);
-
+    
+    // Cleanup
     return () => {
       socket.off('receive_message', handleReceiveMessage);
       socket.off('typing_indicator', handleTypingIndicator);
       socket.off('user_status', handleUserStatus);
       socket.off('message_delivered', handleMessageDelivered);
-      socket.off('message_error', handleMessageError);
-      socket.off('incoming_call', handleIncomingCall);
-      socket.off('call_accepted', handleCallAccepted);
-      socket.off('call_rejected', handleCallRejected);
-      socket.off('call_ended', handleCallEnded);
     };
-  }, [socket, selectedUser, fetchChats, markMessagesAsRead, scrollToBottom, user?.id]);
+  }, [socket, isConnected, selectedChat, user?.id, fetchChats]);
 
   // Initialize data
   useEffect(() => {
     if (user?.id) {
       fetchChats();
       fetchUsers();
+      
+      // Connect user to socket
+      if (socket && isConnected) {
+        socket.emit('user_connected', user.id);
+      }
     }
-  }, [user?.id, fetchChats, fetchUsers]);
+  }, [user?.id, socket, isConnected, fetchChats, fetchUsers]);
 
-  // Auto-scroll to bottom when messages change
+  // Load messages when chat is selected
   useEffect(() => {
-    if (messages.length > 0) {
-      setTimeout(scrollToBottom, 100);
+    if (selectedChat) {
+      setMessages([]);
+      setMessagesPage(1);
+      setHasMoreMessages(true);
+      fetchMessages(selectedChat._id, 1);
+      
+      // Join chat room
+      if (socket && isConnected) {
+        socket.emit('join_chat', selectedChat._id);
+      }
     }
-  }, [messages.length, scrollToBottom]);
+  }, [selectedChat, socket, isConnected, fetchMessages]);
 
-  // Handle input changes with typing indicator
-  const handleInputChange = useCallback((e) => {
-    const value = e.target.value;
-    setNewMessage(value);
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Optimized chat selection
+  const handleChatSelect = useCallback((chat) => {
+    setSelectedChat(chat);
+    setError('');
     
-    if (value.trim() && selectedUser) {
-      handleTyping();
+    if (isMobile) {
+      setMobileView('chat');
     }
-  }, [selectedUser, handleTyping]);
-
-  // Handle form submission
-  const handleSubmit = useCallback((e) => {
-    e.preventDefault();
-    if (newMessage.trim()) {
-      sendMessage(newMessage.trim());
-    }
-  }, [newMessage, sendMessage]);
-
-  // Enhanced notification function
-  const showNotification = useCallback((messageData) => {
-    if (!('Notification' in window)) return;
     
-    if (Notification.permission === 'granted') {
-      const notification = new Notification(
-        `New message from ${messageData.sender.name}`,
-        {
-          body: messageData.content,
-          icon: getImageUrl(messageData.sender.profilePicture),
-          badge: '/logo192.png',
-          tag: `message-${messageData.sender._id}`,
-          requireInteraction: false,
-          silent: false
-        }
+    // Clear message cache for this chat to ensure fresh data
+    const chatCacheKeys = Array.from(messageCache.keys()).filter(key => 
+      key.startsWith(`${chat._id}-`)
+    );
+    chatCacheKeys.forEach(key => messageCache.delete(key));
+  }, [isMobile, messageCache]);
+
+  // Optimized user selection
+  const handleUserSelect = useCallback(async (selectedUser) => {
+    try {
+      setLoading(true);
+      
+      // Check if chat already exists
+      const existingChat = chats.find(chat => 
+        chat.participants?.some(p => p._id === selectedUser._id)
       );
       
-      notification.onclick = () => {
-        window.focus();
-        const user = users.find(u => u._id === messageData.sender._id);
-        if (user) {
-          handleUserSelect(user);
-        }
-        notification.close();
-      };
-      
-      // Auto-close after 5 seconds
-      setTimeout(() => notification.close(), 5000);
-    } else if (Notification.permission !== 'denied') {
-      Notification.requestPermission().then(permission => {
-        if (permission === 'granted') {
-          showNotification(messageData);
-        }
-      });
-    }
-  }, [users, handleUserSelect]);
-
-  // Call functions
-  const initiateCall = useCallback((userId, callType = 'audio') => {
-    if (!socket || !socketConnected) {
-      toast.error('Cannot make calls while disconnected');
-      return;
-    }
-    
-    const callerInfo = {
-      from: user.id,
-      to: userId,
-      callerName: user.name,
-      callerPicture: user.profilePicture,
-      callType
-    };
-    
-    socket.emit('initiate_call', callerInfo);
-    setCallStatus('calling');
-    
-    toast.info(`Calling ${selectedUser?.name}...`);
-  }, [socket, socketConnected, user, selectedUser?.name]);
-
-  const acceptCall = useCallback(() => {
-    if (!socket || !incomingCall) return;
-    
-    socket.emit('call_accepted', {
-      from: incomingCall.to,
-      to: incomingCall.from
-    });
-    
-    setCurrentCall(incomingCall);
-    setCallStatus('ongoing');
-    setIncomingCall(null);
-  }, [socket, incomingCall]);
-
-  const rejectCall = useCallback(() => {
-    if (!socket || !incomingCall) return;
-    
-    socket.emit('call_rejected', {
-      from: incomingCall.to,
-      to: incomingCall.from
-    });
-    
-    setIncomingCall(null);
-    setCallStatus('idle');
-  }, [socket, incomingCall]);
-
-  const endCall = useCallback(() => {
-    if (!socket || !currentCall) return;
-    
-    socket.emit('call_ended', {
-      from: currentCall.to || user.id,
-      to: currentCall.from || currentCall.to
-    });
-    
-    setCurrentCall(null);
-    setCallStatus('idle');
-  }, [socket, currentCall, user?.id]);
-
-  // Enhanced add chat handler
-  const handleAddChat = useCallback(async (userData) => {
-    try {
-      if (typeof userData === 'string') {
-        // Phone number provided
-        const token = localStorage.getItem('token');
-        const response = await axios.get(
-          `${apiUrl}/api/users/search/phone/${userData}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+      if (existingChat) {
+        handleChatSelect(existingChat);
+      } else {
+        // Create new chat
+        const data = await makeApiRequest('/api/chats', {
+          method: 'POST',
+          data: { participantId: selectedUser._id }
+        });
         
-        if (response.data) {
-          await handleUserSelect(response.data);
-          setShowAddChat(false);
-          toast.success(`Started chat with ${response.data.name}`);
+        if (data) {
+          setChats(prev => [data, ...prev]);
+          handleChatSelect(data);
+        }
+      }
+      
+      if (isMobile) {
+        setMobileView('chat');
+      }
+    } catch (error) {
+      console.error('Error selecting user:', error);
+      toast.error('Failed to start chat');
+    } finally {
+      setLoading(false);
+    }
+  }, [chats, handleChatSelect, isMobile, makeApiRequest]);
+
+  // Optimized add chat by phone
+  const handleAddChatByPhone = useCallback(async (userData) => {
+    try {
+      setLoading(true);
+      
+      if (typeof userData === 'string') {
+        // Phone number provided, search for user
+        const foundUser = await makeApiRequest(`/api/users/search/phone/${userData}`);
+        if (foundUser) {
+          await handleUserSelect(foundUser);
         }
       } else {
         // User object provided
         await handleUserSelect(userData);
-        setShowAddChat(false);
-        toast.success(`Started chat with ${userData.name}`);
       }
+      
+      setShowAddChatModal(false);
     } catch (error) {
       console.error('Error adding chat:', error);
+      toast.error('Failed to add chat');
+    } finally {
+      setLoading(false);
+    }
+  }, [handleUserSelect, makeApiRequest]);
+
+  // Optimized message input change
+  const handleMessageInputChange = useCallback((e) => {
+    const value = e.target.value;
+    setNewMessage(value);
+    
+    // Handle typing indicator
+    if (value.trim() && selectedChat) {
+      handleTyping();
+    }
+  }, [selectedChat, handleTyping]);
+
+  // Optimized message send
+  const handleSendMessage = useCallback((content) => {
+    if (content?.trim()) {
+      sendMessage(content);
+    }
+  }, [sendMessage]);
+
+  // Load more messages (pagination)
+  const loadMoreMessages = useCallback(async () => {
+    if (!hasMoreMessages || messagesLoading || !selectedChat) return;
+    
+    const nextPage = messagesPage + 1;
+    await fetchMessages(selectedChat._id, nextPage, true);
+    setMessagesPage(nextPage);
+  }, [hasMoreMessages, messagesLoading, selectedChat, messagesPage, fetchMessages]);
+
+  // Infinite scroll handler
+  const handleScroll = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    
+    if (container.scrollTop === 0 && hasMoreMessages && !messagesLoading) {
+      loadMoreMessages();
+    }
+  }, [hasMoreMessages, messagesLoading, loadMoreMessages]);
+
+  // Format message time
+  const formatMessageTime = useCallback((timestamp) => {
+    if (!timestamp) return '';
+    
+    try {
+      const date = new Date(timestamp);
+      const now = new Date();
       
-      if (error.response?.status === 404) {
-        toast.error('User not found with this phone number');
-      } else {
-        toast.error('Failed to add chat');
+      if (now.toDateString() === date.toDateString()) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       }
-    }
-  }, [handleUserSelect, apiUrl]);
-
-  // Connection status component
-  const ConnectionStatus = () => {
-    if (!socketConnected) {
-      return (
-        <Chip
-          icon={<WifiOffIcon />}
-          label="Reconnecting..."
-          size="small"
-          color="warning"
-          variant="outlined"
-        />
-      );
-    }
-    
-    return (
-      <Chip
-        icon={<WifiIcon />}
-        label="Connected"
-        size="small"
-        color="success"
-        variant="outlined"
-      />
-    );
-  };
-
-  // Enhanced chat list item
-  const ChatListItem = ({ chat, isActive, onClick }) => {
-    const otherUser = chat.participants?.find(p => p._id !== user?.id);
-    const unreadCount = unreadCounts[chat._id] || 0;
-    const lastMessage = chat.lastMessage;
-    
-    return (
-      <ListItem
-        button
-        selected={isActive}
-        onClick={() => onClick(chat, otherUser)}
-        className={`chat-item ${isActive ? 'active' : ''}`}
-        sx={{
-          borderRadius: 2,
-          mb: 1,
-          transition: 'all 0.2s ease',
-          '&:hover': {
-            backgroundColor: 'action.hover',
-            transform: 'translateX(4px)'
-          },
-          '&.Mui-selected': {
-            backgroundColor: 'primary.50',
-            borderLeft: '4px solid',
-            borderLeftColor: 'primary.main'
-          }
-        }}
-      >
-        <ListItemAvatar>
-          <Badge
-            badgeContent={unreadCount}
-            color="primary"
-            max={99}
-            invisible={unreadCount === 0}
-          >
-            <Avatar
-              src={getImageUrl(otherUser?.profilePicture)}
-              alt={otherUser?.name}
-              sx={{ 
-                width: 48, 
-                height: 48,
-                border: '2px solid',
-                borderColor: otherUser?.isOnline ? 'success.main' : 'grey.300'
-              }}
-            >
-              {otherUser?.name?.[0]?.toUpperCase()}
-            </Avatar>
-          </Badge>
-        </ListItemAvatar>
-        
-        <ListItemText
-          primary={
-            <Box display="flex" justifyContent="space-between" alignItems="center">
-              <Typography variant="subtitle1" fontWeight="medium" noWrap>
-                {chat.isGroup ? chat.groupName : otherUser?.name}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {lastMessage && formatMessageTime(lastMessage.createdAt)}
-              </Typography>
-            </Box>
-          }
-          secondary={
-            <Box display="flex" alignItems="center" gap={1}>
-              <Typography 
-                variant="body2" 
-                color="text.secondary" 
-                noWrap 
-                sx={{ flex: 1 }}
-              >
-                {lastMessage?.content || 'No messages yet'}
-              </Typography>
-              {lastMessage?.status && lastMessage.sender === user?.id && (
-                <Box display="flex" alignItems="center">
-                  {lastMessage.status === 'sent' && <DoneIcon fontSize="small" />}
-                  {lastMessage.status === 'delivered' && <DoneIcon fontSize="small" />}
-                  {lastMessage.status === 'read' && <DoneAllIcon fontSize="small" color="primary" />}
-                </Box>
-              )}
-            </Box>
-          }
-        />
-      </ListItem>
-    );
-  };
-
-  // Enhanced user list item
-  const UserListItem = ({ user: listUser, onClick }) => (
-    <ListItem
-      button
-      onClick={() => onClick(listUser)}
-      sx={{
-        borderRadius: 2,
-        mb: 1,
-        transition: 'all 0.2s ease',
-        '&:hover': {
-          backgroundColor: 'action.hover',
-          transform: 'translateX(4px)'
-        }
-      }}
-    >
-      <ListItemAvatar>
-        <Avatar
-          src={getImageUrl(listUser.profilePicture)}
-          alt={listUser.name}
-          sx={{ 
-            width: 48, 
-            height: 48,
-            border: '2px solid',
-            borderColor: listUser.isOnline ? 'success.main' : 'grey.300'
-          }}
-        >
-          {listUser.name?.[0]?.toUpperCase()}
-        </Avatar>
-      </ListItemAvatar>
       
-      <ListItemText
-        primary={
-          <Box display="flex" alignItems="center" gap={1}>
-            <Typography variant="subtitle1" fontWeight="medium">
-              {listUser.name}
-            </Typography>
-            {listUser.isOnline && (
-              <Chip
-                label="Online"
-                size="small"
-                color="success"
-                variant="outlined"
-              />
-            )}
-          </Box>
-        }
-        secondary={
-          <Typography variant="body2" color="text.secondary">
-            {listUser.status || 'Available'}
-          </Typography>
-        }
-      />
-    </ListItem>
-  );
+      return formatDistanceToNow(date, { addSuffix: true });
+    } catch (error) {
+      return '';
+    }
+  }, []);
 
-  // Enhanced message component
-  const MessageComponent = ({ message, isOwn, showAvatar = true }) => {
-    const [showActions, setShowActions] = useState(false);
+  // Get other user from chat
+  const getOtherUser = useCallback((chat) => {
+    return chat?.participants?.find(p => p._id !== user?.id);
+  }, [user?.id]);
+
+  // Render chat item
+  const renderChatItem = useCallback((chat) => {
+    const otherUser = getOtherUser(chat);
+    if (!otherUser) return null;
+    
+    const isActive = selectedChat?._id === chat._id;
+    const isOnline = onlineUsers.has(otherUser._id);
     
     return (
-      <Box
-        display="flex"
-        justifyContent={isOwn ? 'flex-end' : 'flex-start'}
-        mb={1}
-        onMouseEnter={() => setShowActions(true)}
-        onMouseLeave={() => setShowActions(false)}
+      <div
+        key={chat._id}
+        className={`chat-item p-3 rounded-lg cursor-pointer transition-all duration-200 ${
+          isActive 
+            ? 'bg-primary-50 dark:bg-primary-900/30 border-l-4 border-primary-500' 
+            : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+        }`}
+        onClick={() => handleChatSelect(chat)}
       >
-        {!isOwn && showAvatar && (
-          <Avatar
-            src={getImageUrl(message.sender?.profilePicture)}
-            alt={message.sender?.name}
-            sx={{ width: 32, height: 32, mr: 1 }}
-          >
-            {message.sender?.name?.[0]?.toUpperCase()}
-          </Avatar>
-        )}
-        
-        <Box maxWidth="75%">
-          <Paper
-            elevation={1}
-            sx={{
-              p: 1.5,
-              borderRadius: 3,
-              backgroundColor: isOwn ? 'primary.main' : 'background.paper',
-              color: isOwn ? 'primary.contrastText' : 'text.primary',
-              borderBottomRightRadius: isOwn ? 1 : 3,
-              borderBottomLeftRadius: isOwn ? 3 : 1,
-              position: 'relative',
-              transition: 'all 0.2s ease',
-              '&:hover': {
-                transform: 'translateY(-1px)',
-                boxShadow: 2
-              }
-            }}
-          >
-            {replyingTo?.messageId === message._id && (
-              <Box
-                sx={{
-                  borderLeft: '3px solid',
-                  borderLeftColor: 'primary.main',
-                  pl: 1,
-                  mb: 1,
-                  opacity: 0.7
-                }}
-              >
-                <Typography variant="caption">
-                  Replying to: {replyingTo.content.substring(0, 50)}...
-                </Typography>
-              </Box>
-            )}
-            
-            <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
-              {message.content}
-            </Typography>
-            
-            <Box
-              display="flex"
-              justifyContent="space-between"
-              alignItems="center"
-              mt={0.5}
-            >
-              <Typography
-                variant="caption"
-                sx={{
-                  opacity: 0.8,
-                  fontSize: '0.7rem'
-                }}
-              >
-                {format(new Date(message.createdAt), 'HH:mm')}
-              </Typography>
-              
-              {isOwn && (
-                <Box display="flex" alignItems="center" ml={1}>
-                  {message.status === 'sending' && (
-                    <CircularProgress size={12} sx={{ opacity: 0.7 }} />
-                  )}
-                  {message.status === 'sent' && (
-                    <DoneIcon sx={{ fontSize: 14, opacity: 0.7 }} />
-                  )}
-                  {message.status === 'delivered' && (
-                    <DoneIcon sx={{ fontSize: 14, opacity: 0.7 }} />
-                  )}
-                  {message.status === 'read' && (
-                    <DoneAllIcon sx={{ fontSize: 14, color: 'primary.light' }} />
-                  )}
-                  {message.status === 'failed' && (
-                    <ErrorIcon sx={{ fontSize: 14, color: 'error.main' }} />
-                  )}
-                </Box>
+        <div className="flex items-center space-x-3">
+          <ProfilePicture
+            userId={otherUser._id}
+            name={otherUser.name}
+            imageUrl={otherUser.profilePicture}
+            isOnline={isOnline}
+            size="md"
+            showStatus={true}
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between">
+              <h3 className="font-medium text-neutral-900 dark:text-white truncate">
+                {otherUser.name}
+              </h3>
+              {chat.lastMessage && (
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                  {formatMessageTime(chat.lastMessage.createdAt)}
+                </span>
               )}
-            </Box>
-            
-            {/* Message actions */}
-            <Fade in={showActions && !isMobile}>
-              <Box
-                position="absolute"
-                top={-20}
-                right={isOwn ? 0 : 'auto'}
-                left={isOwn ? 'auto' : 0}
-                display="flex"
-                gap={0.5}
-                sx={{
-                  backgroundColor: 'background.paper',
-                  borderRadius: 2,
-                  boxShadow: 2,
-                  p: 0.5
-                }}
-              >
-                <IconButton size="small" onClick={() => setReplyingTo(message)}>
-                  <ReplyIcon fontSize="small" />
-                </IconButton>
-                <IconButton size="small">
-                  <StarBorderIcon fontSize="small" />
-                </IconButton>
-                {isOwn && (
-                  <IconButton size="small" onClick={() => setEditingMessage(message)}>
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                )}
-              </Box>
-            </Fade>
-          </Paper>
-        </Box>
-      </Box>
+            </div>
+            {chat.lastMessage && (
+              <p className="text-sm text-neutral-600 dark:text-neutral-400 truncate">
+                {chat.lastMessage.content}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
     );
-  };
+  }, [selectedChat, onlineUsers, getOtherUser, handleChatSelect, formatMessageTime]);
 
-  // Enhanced sidebar component
-  const Sidebar = () => (
-    <Paper
-      elevation={0}
-      sx={{
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        borderRadius: 0,
-        borderRight: 1,
-        borderColor: 'divider'
-      }}
-    >
-      {/* Sidebar Header */}
-      <Box
-        sx={{
-          p: 2,
-          borderBottom: 1,
-          borderColor: 'divider',
-          backgroundColor: 'background.paper'
-        }}
+  // Render user item
+  const renderUserItem = useCallback((userData) => {
+    const isOnline = onlineUsers.has(userData._id);
+    
+    return (
+      <div
+        key={userData._id}
+        className="user-item p-3 rounded-lg cursor-pointer hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all duration-200"
+        onClick={() => handleUserSelect(userData)}
       >
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-          <Typography variant="h6" fontWeight="bold">
-            Modern Chat
-          </Typography>
-          <Box display="flex" gap={1}>
-            <ConnectionStatus />
-            <IconButton size="small" onClick={() => setShowSettings(true)}>
-              <SettingsIcon />
-            </IconButton>
-          </Box>
-        </Box>
-        
-        {/* Search */}
-        <TextField
-          fullWidth
-          size="small"
-          placeholder="Search chats and users..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          InputProps={{
-            startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
-          }}
-          sx={{
-            '& .MuiOutlinedInput-root': {
-              borderRadius: 3
-            }
-          }}
-        />
-      </Box>
+        <div className="flex items-center space-x-3">
+          <ProfilePicture
+            userId={userData._id}
+            name={userData.name}
+            imageUrl={userData.profilePicture}
+            isOnline={isOnline}
+            size="md"
+            showStatus={true}
+          />
+          <div className="flex-1 min-w-0">
+            <h3 className="font-medium text-neutral-900 dark:text-white truncate">
+              {userData.name}
+            </h3>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400 truncate">
+              {userData.email}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }, [onlineUsers, handleUserSelect]);
 
-      {/* Tabs */}
-      <Tabs
-        value={activeTab}
-        onChange={(e, newValue) => setActiveTab(newValue)}
-        variant="fullWidth"
-        sx={{
-          borderBottom: 1,
-          borderColor: 'divider',
-          '& .MuiTab-root': {
-            minHeight: 48,
-            fontWeight: 'medium'
-          }
-        }}
+  // Render message
+  const renderMessage = useCallback((message) => {
+    const isOwn = message.sender?._id === user?.id;
+    const showAvatar = !isOwn;
+    
+    return (
+      <div
+        key={message._id || message.tempId}
+        className={`flex ${isOwn ? 'justify-end' : 'justify-start'} mb-4`}
       >
-        <Tab
-          icon={<Badge badgeContent={Object.keys(unreadCounts).length} color="primary"><ChatIcon /></Badge>}
-          }
-          label="Chats"
-          iconPosition="start"
-        />
-        <Tab
-          icon={<PersonAddIcon />}
-          label="Users"
-          iconPosition="start"
-        />
-      </Tabs>
-
-      {/* Content */}
-      <Box sx={{ flex: 1, overflow: 'hidden' }}>
-        {/* Chats Tab */}
-        {activeTab === 0 && (
-          <Box sx={{ height: '100%', overflow: 'auto' }}>
-            {loading ? (
-              <Box p={2}>
-                {[...Array(5)].map((_, i) => (
-                  <Box key={i} display="flex" alignItems="center" gap={2} mb={2}>
-                    <Skeleton variant="circular" width={48} height={48} />
-                    <Box flex={1}>
-                      <Skeleton variant="text" width="60%" />
-                      <Skeleton variant="text" width="40%" />
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
-            ) : filteredChats.length > 0 ? (
-              <List sx={{ p: 1 }}>
-                {filteredChats.map((chat) => (
-                  <ChatListItem
-                    key={chat._id}
-                    chat={chat}
-                    isActive={selectedChat?._id === chat._id}
-                    onClick={handleChatSelect}
-                  />
-                ))}
-              </List>
-            ) : (
-              <Box
-                display="flex"
-                flexDirection="column"
-                alignItems="center"
-                justifyContent="center"
-                height="100%"
-                p={3}
-                textAlign="center"
-              >
-                <ChatIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="h6" color="text.secondary" gutterBottom>
-                  No chats yet
-                </Typography>
-                <Typography variant="body2" color="text.secondary" mb={3}>
-                  Start a conversation by selecting a user
-                </Typography>
-                <Button
-                  variant="contained"
-                  startIcon={<PersonAddIcon />}
-                  onClick={() => setActiveTab(1)}
-                >
-                  Find Users
-                </Button>
-              </Box>
-            )}
-          </Box>
+        {showAvatar && (
+          <ProfilePicture
+            userId={message.sender?._id}
+            name={message.sender?.name}
+            imageUrl={message.sender?.profilePicture}
+            size="sm"
+            showStatus={false}
+            className="mr-2"
+          />
         )}
-
-        {/* Users Tab */}
-        {activeTab === 1 && (
-          <Box sx={{ height: '100%', overflow: 'auto' }}>
-            <Box p={2}>
-              <Button
-                fullWidth
-                variant="outlined"
-                startIcon={<AddIcon />}
-                onClick={() => setShowAddChat(true)}
-                sx={{ mb: 2 }}
-              >
-                Add by Phone Number
-              </Button>
-            </Box>
-            
-            {loadingUsers ? (
-              <Box p={2}>
-                {[...Array(5)].map((_, i) => (
-                  <Box key={i} display="flex" alignItems="center" gap={2} mb={2}>
-                    <Skeleton variant="circular" width={48} height={48} />
-                    <Box flex={1}>
-                      <Skeleton variant="text" width="60%" />
-                      <Skeleton variant="text" width="40%" />
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
-            ) : filteredUsers.length > 0 ? (
-              <List sx={{ p: 1 }}>
-                {filteredUsers.map((listUser) => (
-                  <UserListItem
-                    key={listUser._id}
-                    user={listUser}
-                    onClick={handleUserSelect}
-                  />
-                ))}
-              </List>
-            ) : (
-              <Box
-                display="flex"
-                flexDirection="column"
-                alignItems="center"
-                justifyContent="center"
-                height="200px"
-                p={3}
-                textAlign="center"
-              >
-                <PersonAddIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="h6" color="text.secondary" gutterBottom>
-                  No users found
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Try adjusting your search or add users by phone
-                </Typography>
-              </Box>
+        <div
+          className={`max-w-xs lg:max-w-md px-4 py-2 rounded-2xl ${
+            isOwn
+              ? 'bg-primary-500 text-white rounded-br-md'
+              : 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white border border-neutral-200 dark:border-neutral-700 rounded-bl-md'
+          } shadow-sm`}
+        >
+          <p className="text-sm">{message.content}</p>
+          <div className="flex items-center justify-end mt-1 space-x-1">
+            <span className="text-xs opacity-75">
+              {formatMessageTime(message.createdAt)}
+            </span>
+            {isOwn && (
+              <span className="text-xs opacity-75">
+                {message.status === 'sending' && '⏳'}
+                {message.status === 'sent' && '✓'}
+                {message.status === 'delivered' && '✓✓'}
+                {message.status === 'read' && '✓✓'}
+                {message.status === 'failed' && '❌'}
+              </span>
             )}
-          </Box>
-        )}
-      </Box>
-    </Paper>
+          </div>
+        </div>
+      </div>
+    );
+  }, [user?.id, formatMessageTime]);
+
+  // Mobile back handler
+  const handleMobileBack = useCallback(() => {
+    setMobileView('chats');
+    setSelectedChat(null);
+  }, []);
+
+  // Connection status indicator
+  const ConnectionStatus = () => (
+    <div className={`flex items-center space-x-2 px-3 py-2 rounded-lg ${
+      isConnected 
+        ? 'bg-success-50 text-success-700 dark:bg-success-900/20 dark:text-success-400' 
+        : 'bg-error-50 text-error-700 dark:bg-error-900/20 dark:text-error-400'
+    }`}>
+      <div className={`w-2 h-2 rounded-full ${
+        isConnected ? 'bg-success-500 animate-pulse' : 'bg-error-500'
+      }`} />
+      <span className="text-sm font-medium">
+        {isConnected ? 'Connected' : 'Reconnecting...'}
+      </span>
+    </div>
   );
 
-  // Enhanced main chat area
-  const MainChatArea = () => {
-    if (!selectedUser) {
-      return (
-        <Paper
-          elevation={0}
-          sx={{
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            textAlign: 'center',
-            p: 4,
-            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%)'
-          }}
-        >
-          <ChatIcon sx={{ fontSize: 120, color: 'text.secondary', mb: 3 }} />
-          <Typography variant="h4" color="text.secondary" gutterBottom fontWeight="light">
-            Welcome to Modern Chat
-          </Typography>
-          <Typography variant="body1" color="text.secondary" mb={4} maxWidth={400}>
-            Select a conversation from the sidebar to start chatting, or find new users to connect with.
-          </Typography>
-          <Box display="flex" gap={2}>
-            <Button
-              variant="contained"
-              startIcon={<PersonAddIcon />}
-              onClick={() => setActiveTab(1)}
+  // Main render
+  return (
+    <div className="h-screen flex bg-neutral-50 dark:bg-neutral-900 overflow-hidden">
+      {/* Sidebar - Chats and Users */}
+      <div className={`${
+        isMobile 
+          ? mobileView === 'chats' ? 'w-full' : 'hidden'
+          : 'w-80 border-r border-neutral-200 dark:border-neutral-800'
+      } bg-white dark:bg-neutral-900 flex flex-col`}>
+        
+        {/* Header */}
+        <div className="p-4 border-b border-neutral-200 dark:border-neutral-800">
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-xl font-bold text-neutral-900 dark:text-white">
+              Modern Chat
+            </h1>
+            <button
+              onClick={() => setShowAddChatModal(true)}
+              className="p-2 bg-primary-500 text-white rounded-full hover:bg-primary-600 transition-colors"
+              aria-label="Add new chat"
             >
-              Find Users
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<AddIcon />}
-              onClick={() => setShowAddChat(true)}
+              <i className="bi bi-plus-lg"></i>
+            </button>
+          </div>
+          
+          {/* Connection Status */}
+          <ConnectionStatus />
+          
+          {/* Search */}
+          <div className="mt-3">
+            <input
+              type="text"
+              placeholder="Search chats and users..."
+              className="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              onChange={(e) => debouncedSearch(e.target.value)}
+            />
+          </div>
+          
+          {/* Tabs */}
+          <div className="flex mt-3 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1">
+            <button
+              className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                activeTab === 'chats'
+                  ? 'bg-white dark:bg-neutral-700 text-primary-600 dark:text-primary-400 shadow-sm'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+              }`}
+              onClick={() => setActiveTab('chats')}
             >
-              Add by Phone
-            </Button>
-          </Box>
-        </Paper>
-      );
-    }
-
-    return (
-      <Paper
-        elevation={0}
-        sx={{
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          borderRadius: 0
-        }}
-      >
-        {/* Chat Header */}
-        <AppBar
-          position="static"
-          elevation={0}
-          sx={{
-            backgroundColor: 'background.paper',
-            color: 'text.primary',
-            borderBottom: 1,
-            borderColor: 'divider'
-          }}
-        >
-          <Toolbar sx={{ minHeight: '64px !important' }}>
-            {isMobile && (
-              <IconButton
-                edge="start"
-                onClick={() => setMobileView('chats')}
-                sx={{ mr: 2 }}
+              Chats ({filteredChats.length})
+            </button>
+            <button
+              className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                activeTab === 'users'
+                  ? 'bg-white dark:bg-neutral-700 text-primary-600 dark:text-primary-400 shadow-sm'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+              }`}
+              onClick={() => setActiveTab('users')}
+            >
+              Users ({filteredUsers.length})
+            </button>
+          </div>
+        </div>
+        
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center h-32">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+            </div>
+          ) : error ? (
+            <div className="p-4 text-center text-error-600 dark:text-error-400">
+              {error}
+              <button
+                onClick={() => {
+                  setError('');
+                  fetchChats();
+                  fetchUsers();
+                }}
+                className="block mx-auto mt-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
               >
-                <ArrowBackIcon />
-              </IconButton>
-            )}
-            
-            <Avatar
-              src={getImageUrl(selectedUser.profilePicture)}
-              alt={selectedUser.name}
-              sx={{ 
-                width: 40, 
-                height: 40, 
-                mr: 2,
-                border: '2px solid',
-                borderColor: selectedUser.isOnline ? 'success.main' : 'grey.300'
-              }}
-            >
-              {selectedUser.name?.[0]?.toUpperCase()}
-            </Avatar>
-            
-            <Box flex={1}>
-              <Typography variant="subtitle1" fontWeight="medium">
-                {selectedUser.name}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {selectedUser.isOnline ? (
-                  <Box display="flex" alignItems="center" gap={0.5}>
-                    <Box
-                      width={8}
-                      height={8}
-                      borderRadius="50%"
-                      bgcolor="success.main"
-                    />
-                    Online
-                  </Box>
+                Retry
+              </button>
+            </div>
+          ) : (
+            <div className="p-2">
+              {activeTab === 'chats' ? (
+                filteredChats.length > 0 ? (
+                  <div className="space-y-1">
+                    {filteredChats.map(renderChatItem)}
+                  </div>
                 ) : (
-                  `Last seen ${formatDistanceToNow(new Date(selectedUser.lastSeen), { addSuffix: true })}`
+                  <div className="text-center py-8 text-neutral-500 dark:text-neutral-400">
+                    <i className="bi bi-chat-dots text-4xl mb-2 block"></i>
+                    <p>No chats yet</p>
+                    <p className="text-sm">Start a conversation!</p>
+                  </div>
+                )
+              ) : (
+                filteredUsers.length > 0 ? (
+                  <div className="space-y-1">
+                    {filteredUsers.map(renderUserItem)}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-neutral-500 dark:text-neutral-400">
+                    <i className="bi bi-people text-4xl mb-2 block"></i>
+                    <p>No users found</p>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      
+      {/* Main Chat Area */}
+      <div className={`${
+        isMobile 
+          ? mobileView === 'chat' ? 'w-full' : 'hidden'
+          : 'flex-1'
+      } flex flex-col bg-neutral-50 dark:bg-neutral-900`}>
+        
+        {selectedChat ? (
+          <>
+            {/* Chat Header */}
+            <div className="p-4 bg-white dark:bg-neutral-800 border-b border-neutral-200 dark:border-neutral-700">
+              <div className="flex items-center space-x-3">
+                {isMobile && (
+                  <button
+                    onClick={handleMobileBack}
+                    className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-full transition-colors"
+                  >
+                    <i className="bi bi-arrow-left"></i>
+                  </button>
                 )}
-              </Typography>
-            </Box>
-            
-            <Box display="flex" gap={1}>
-              <Tooltip title="Voice call">
-                <IconButton
-                  onClick={() => initiateCall(selectedUser._id, 'audio')}
-                  disabled={!socketConnected}
-                >
-                  <PhoneIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Video call">
-                <IconButton
-                  onClick={() => initiateCall(selectedUser._id, 'video')}
-                  disabled={!socketConnected}
-                >
-                  <VideoCallIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Chat info">
-                <IconButton onClick={() => setShowUserInfo(true)}>
-                  <InfoIcon />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          </Toolbar>
-        </AppBar>
-
-        {/* Messages Area */}
-        <Box
-          ref={chatContainerRef}
-          sx={{
-            flex: 1,
-            overflow: 'auto',
-            p: 2,
-            background: 'linear-gradient(to bottom, rgba(245, 247, 250, 0.3), rgba(245, 247, 250, 0.1))'
-          }}
-          className="auto-hide-scrollbar"
-        >
-          {loadingMessages ? (
-            <Box display="flex" justifyContent="center" p={4}>
-              <CircularProgress />
-            </Box>
-          ) : sortedMessages.length > 0 ? (
-            <>
-              {sortedMessages.map((message, index) => {
-                const isOwn = message.sender?._id === user?.id;
-                const showAvatar = !isOwn && (
-                  index === 0 || 
-                  sortedMessages[index - 1]?.sender?._id !== message.sender?._id
-                );
                 
-                return (
-                  <MessageComponent
-                    key={message._id}
-                    message={message}
-                    isOwn={isOwn}
-                    showAvatar={showAvatar}
-                  />
-                );
-              })}
+                {(() => {
+                  const otherUser = getOtherUser(selectedChat);
+                  if (!otherUser) return null;
+                  
+                  return (
+                    <>
+                      <ProfilePicture
+                        userId={otherUser._id}
+                        name={otherUser.name}
+                        imageUrl={otherUser.profilePicture}
+                        isOnline={onlineUsers.has(otherUser._id)}
+                        size="md"
+                        showStatus={true}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <h2 className="font-semibold text-neutral-900 dark:text-white truncate">
+                          {otherUser.name}
+                        </h2>
+                        <p className="text-sm text-neutral-600 dark:text-neutral-400">
+                          {onlineUsers.has(otherUser._id) ? 'Online' : 'Offline'}
+                        </p>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+            
+            {/* Messages */}
+            <div 
+              ref={messagesContainerRef}
+              className="flex-1 overflow-y-auto p-4 space-y-4"
+              onScroll={handleScroll}
+            >
+              {messagesLoading && messagesPage === 1 && (
+                <div className="flex items-center justify-center py-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500"></div>
+                </div>
+              )}
+              
+              {hasMoreMessages && messagesPage > 1 && (
+                <div className="text-center py-2">
+                  <button
+                    onClick={loadMoreMessages}
+                    disabled={messagesLoading}
+                    className="px-4 py-2 bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-lg hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors disabled:opacity-50"
+                  >
+                    {messagesLoading ? 'Loading...' : 'Load more messages'}
+                  </button>
+                </div>
+              )}
+              
+              {messages.map(renderMessage)}
               
               {/* Typing indicator */}
               {typingUsers.size > 0 && (
-                <Box display="flex" justifyContent="flex-start" mb={1}>
-                  <TypingIndicator senderName={selectedUser.name} />
-                </Box>
+                <TypingIndicator 
+                  senderName={selectedChat.participants?.find(p => 
+                    typingUsers.has(p._id) && p._id !== user?.id
+                  )?.name}
+                />
               )}
               
               <div ref={messagesEndRef} />
-            </>
-          ) : (
-            <Box
-              display="flex"
-              flexDirection="column"
-              alignItems="center"
-              justifyContent="center"
-              height="100%"
-              textAlign="center"
-            >
-              <MessageIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                No messages yet
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Start the conversation with {selectedUser.name}
-              </Typography>
-            </Box>
-          )}
-        </Box>
-
-        {/* Message Input */}
-        <Box
-          sx={{
-            p: 2,
-            borderTop: 1,
-            borderColor: 'divider',
-            backgroundColor: 'background.paper'
-          }}
-        >
-          {replyingTo && (
-            <Box
-              sx={{
-                mb: 1,
-                p: 1,
-                backgroundColor: 'action.hover',
-                borderRadius: 2,
-                borderLeft: '3px solid',
-                borderLeftColor: 'primary.main'
-              }}
-            >
-              <Box display="flex" justifyContent="space-between" alignItems="center">
-                <Typography variant="caption" color="primary">
-                  Replying to: {replyingTo.content.substring(0, 50)}...
-                </Typography>
-                <IconButton size="small" onClick={() => setReplyingTo(null)}>
-                  <CloseIcon fontSize="small" />
-                </IconButton>
-              </Box>
-            </Box>
-          )}
-          
-          <form onSubmit={handleSubmit}>
-            <Box display="flex" alignItems="flex-end" gap={1}>
-              <TextField
+            </div>
+            
+            {/* Message Input */}
+            <div className="p-4 bg-white dark:bg-neutral-800 border-t border-neutral-200 dark:border-neutral-700">
+              <MessageInput
                 ref={messageInputRef}
-                fullWidth
-                multiline
-                maxRows={4}
-                placeholder="Type a message..."
                 value={newMessage}
-                onChange={handleInputChange}
-                disabled={sendingMessage || !socketConnected}
-                variant="outlined"
-                size="small"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 3,
-                    backgroundColor: 'background.default'
-                  }
-                }}
-                InputProps={{
-                  startAdornment: (
-                    <Box display="flex" gap={0.5} mr={1}>
-                      <IconButton size="small" disabled>
-                        <EmojiIcon />
-                      </IconButton>
-                      <IconButton size="small" disabled>
-                        <AttachFileIcon />
-                      </IconButton>
-                    </Box>
-                  )
-                }}
+                onChange={handleMessageInputChange}
+                onSend={handleSendMessage}
+                disabled={!isConnected}
+                placeholder={isConnected ? "Type a message..." : "Connecting..."}
+                maxLength={2000}
+                isMobile={isMobile}
               />
-              
-              <IconButton
-                type="submit"
-                disabled={!newMessage.trim() || sendingMessage || !socketConnected}
-                sx={{
-                  backgroundColor: 'primary.main',
-                  color: 'primary.contrastText',
-                  '&:hover': {
-                    backgroundColor: 'primary.dark'
-                  },
-                  '&:disabled': {
-                    backgroundColor: 'action.disabledBackground'
-                  }
-                }}
-              >
-                {sendingMessage ? (
-                  <CircularProgress size={20} color="inherit" />
-                ) : (
-                  <SendIcon />
-                )}
-              </IconButton>
-            </Box>
-          </form>
-        </Box>
-      </Paper>
-    );
-  };
-
-  // Mobile layout
-  if (isMobile) {
-    return (
-      <Box sx={{ height: '100vh', overflow: 'hidden' }}>
-        {mobileView === 'chats' ? (
-          <Sidebar />
+            </div>
+          </>
         ) : (
-          <MainChatArea />
+          <div className="flex-1 flex items-center justify-center bg-neutral-50 dark:bg-neutral-900">
+            <div className="text-center">
+              <i className="bi bi-chat-dots text-6xl text-neutral-400 dark:text-neutral-600 mb-4 block"></i>
+              <h2 className="text-xl font-semibold text-neutral-700 dark:text-neutral-300 mb-2">
+                Welcome to Modern Chat
+              </h2>
+              <p className="text-neutral-500 dark:text-neutral-400">
+                Select a chat to start messaging
+              </p>
+            </div>
+          </div>
         )}
-        
-        {/* Add Chat Dialog */}
-        <AddChatByPhone
-          open={showAddChat}
-          onClose={() => setShowAddChat(false)}
-          onAdd={handleAddChat}
-        />
-        
-        {/* Incoming Call Alert */}
-        <IncomingCallAlert
-          open={!!incomingCall}
-          caller={incomingCall}
-          onAccept={acceptCall}
-          onReject={rejectCall}
-        />
-        
-        {/* Current Call Modal */}
-        <CallModal
-          open={!!currentCall}
-          caller={currentCall}
-          callStatus={callStatus}
-          onClose={endCall}
-        />
-      </Box>
-    );
-  }
-
-  // Desktop layout
-  return (
-    <Container maxWidth="xl" sx={{ height: '100vh', p: 0 }}>
-      <Grid container sx={{ height: '100%' }}>
-        <Grid item xs={12} md={4} lg={3}>
-          <Sidebar />
-        </Grid>
-        <Grid item xs={12} md={8} lg={9}>
-          <MainChatArea />
-        </Grid>
-      </Grid>
+      </div>
       
-      {/* Dialogs and Modals */}
+      {/* Add Chat Modal */}
       <AddChatByPhone
-        open={showAddChat}
-        onClose={() => setShowAddChat(false)}
-        onAdd={handleAddChat}
+        open={showAddChatModal}
+        onClose={() => setShowAddChatModal(false)}
+        onAdd={handleAddChatByPhone}
+        error=""
       />
-      
-      <IncomingCallAlert
-        open={!!incomingCall}
-        caller={incomingCall}
-        onAccept={acceptCall}
-        onReject={rejectCall}
-      />
-      
-      <CallModal
-        open={!!currentCall}
-        caller={currentCall}
-        callStatus={callStatus}
-        onClose={endCall}
-      />
-      
-      {/* Error Snackbar */}
-      <Snackbar
-        open={!!error}
-        autoHideDuration={6000}
-        onClose={() => setError(null)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert severity="error" onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      </Snackbar>
-    </Container>
+    </div>
   );
 };
+
+// Debounce utility function
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
 
 export default Chat;

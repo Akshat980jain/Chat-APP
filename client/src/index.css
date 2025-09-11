@@ -1,6 +1,27 @@
 /* Modern Chat App Global Styles */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 
+/* Performance optimizations */
+* {
+  box-sizing: border-box;
+}
+
+/* Reduce paint and layout thrashing */
+.will-change-transform {
+  will-change: transform;
+}
+
+.will-change-opacity {
+  will-change: opacity;
+}
+
+/* GPU acceleration for smooth animations */
+.gpu-accelerated {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
 /* CSS Variables for consistent theming */
 :root {
   /* Primary Colors */
@@ -110,6 +131,19 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
+  /* Improve scrolling performance */
+  -webkit-overflow-scrolling: touch;
+  /* Reduce repaints */
+  transform: translateZ(0);
+}
+
+/* Optimize font loading */
+@font-face {
+  font-family: 'Inter var';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('https://rsms.me/inter/inter.woff2') format('woff2');
 }
 
 /* Typography utilities */
@@ -128,6 +162,8 @@ body {
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: var(--shadow-xl);
+  /* Optimize rendering */
+  transform: translateZ(0);
 }
 
 .dark .card-glass {
@@ -248,11 +284,11 @@ body {
 
 /* Animation utilities */
 .animate-fadeIn {
-  animation: fadeIn 0.3s ease-in-out;
+  animation: fadeIn 0.2s ease-in-out;
 }
 
 .animate-slideUp {
-  animation: slideUp 0.3s ease-out;
+  animation: slideUp 0.2s ease-out;
 }
 
 .animate-pulse {
@@ -268,7 +304,7 @@ body {
 @keyframes slideUp {
   from { 
     opacity: 0; 
-    transform: translateY(10px); 
+    transform: translateY(8px); 
   }
   to { 
     opacity: 1; 
@@ -290,6 +326,9 @@ body {
 .auto-hide-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+  /* Improve scrolling performance */
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
 }
 
 .auto-hide-scrollbar::-webkit-scrollbar {
@@ -349,7 +388,7 @@ body {
 /* Mobile optimizations */
 @media (max-width: 768px) {
   html {
-    font-size: 14px;
+    font-size: 16px; /* Prevent zoom on iOS */
   }
   
   .card-glass {
@@ -357,16 +396,35 @@ body {
     margin: var(--spacing-sm);
   }
   
-  /* Improve touch targets */
-  button, .btn, .form-control, .dropdown-item {
+  /* Optimize touch targets */
+  button, 
+  .btn, 
+  .form-control, 
+  .dropdown-item,
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  textarea {
     min-height: 44px;
-    min-width: 44px;
+    font-size: 16px; /* Prevent zoom on iOS */
   }
   
-  /* Better spacing for mobile */
+  /* Optimize spacing for mobile */
   .container-fluid {
     padding-left: var(--spacing-md);
     padding-right: var(--spacing-md);
+  }
+  
+  /* Optimize mobile scrolling */
+  .mobile-scroll {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  
+  /* Reduce motion on mobile for better performance */
+  .mobile-optimized {
+    transition: none;
+    animation: none;
   }
 }
 
@@ -411,6 +469,55 @@ body {
   .ios-safe-top {
     padding-top: calc(var(--spacing-md) + env(safe-area-inset-top));
   }
+}
+
+/* Optimize for high DPI displays */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  /* Use higher quality images on retina displays */
+  .avatar,
+  .profile-picture {
+    image-rendering: -webkit-optimize-contrast;
+  }
+}
+
+/* Optimize for dark mode transitions */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+}
+
+/* Critical CSS for above-the-fold content */
+.critical-path {
+  /* Inline critical styles here */
+  font-family: var(--font-family-sans);
+  background: var(--color-neutral-50);
+  color: var(--color-neutral-900);
+}
+
+/* Optimize form performance */
+.form-optimized input,
+.form-optimized textarea {
+  /* Reduce repaints during typing */
+  contain: layout style paint;
+}
+
+/* Optimize list virtualization */
+.virtual-list {
+  /* Enable containment for better performance */
+  contain: strict;
+  /* Optimize scrolling */
+  overflow-anchor: none;
+}
+
+/* Optimize image lazy loading */
+.lazy-image {
+  /* Reserve space to prevent layout shifts */
+  aspect-ratio: 1;
+  background: var(--color-neutral-200);
+  /* Optimize loading */
+  loading: lazy;
+  decoding: async;
 }
 
 /* Enhanced focus indicators for accessibility */
@@ -530,9 +637,11 @@ body {
   max-width: 75%;
   word-wrap: break-word;
   position: relative;
-  animation: slideUp 0.2s ease-out;
+  animation: slideUp 0.15s ease-out;
   box-shadow: var(--shadow-sm);
-  transition: all var(--transition-fast);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  /* Optimize rendering */
+  will-change: transform;
 }
 
 .message-bubble:hover {
@@ -568,6 +677,8 @@ body {
   border-top: 1px solid var(--color-neutral-200);
   padding: var(--spacing-md);
   box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1);
+  /* Optimize rendering */
+  transform: translateZ(0);
 }
 
 .dark .chat-input-container {
@@ -1001,6 +1112,72 @@ body {
 
 .will-change-opacity {
   will-change: opacity;
+}
+
+/* Optimize image loading */
+img {
+  max-width: 100%;
+  height: auto;
+  /* Improve image rendering */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+/* Optimize list rendering */
+.chat-list,
+.user-list {
+  /* Enable hardware acceleration */
+  transform: translateZ(0);
+  /* Optimize scrolling */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Reduce layout shifts */
+.chat-item,
+.user-item {
+  min-height: 64px;
+  contain: layout style paint;
+}
+
+/* Optimize transitions */
+.transition-optimized {
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  will-change: transform, opacity;
+}
+
+/* Optimize hover effects */
+@media (hover: hover) {
+  .hover-lift:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* Disable animations on low-end devices */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Optimize for touch devices */
+@media (pointer: coarse) {
+  /* Larger touch targets */
+  button,
+  .btn,
+  .clickable {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Reduce hover effects on touch devices */
+  .hover-effect:hover {
+    transform: none;
+  }
 }
 
 /* Accessibility improvements */

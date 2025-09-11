@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
+import { debounce } from 'lodash';
 
 const ChatInputMobile = ({ 
   chatId, 
@@ -17,36 +18,23 @@ const ChatInputMobile = ({
   const [isSending, setIsSending] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState('');
-  const [retryCount, setRetryCount] = useState(0);
   
   const { user } = useAuth();
-  const { socket, isConnected } = useSocket();
+  const { socket, isConnected, emitEvent } = useSocket();
   const inputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
-  const messageQueueRef = useRef([]);
 
-  // Focus input on mount and when recipient changes
+  // Optimized focus handling
   useEffect(() => {
     if (inputRef.current && autoFocus) {
       const timer = setTimeout(() => {
         inputRef.current.focus();
-      }, 300);
+      }, 100);
       return () => clearTimeout(timer);
     }
   }, [chatId, recipientId, autoFocus]);
 
-  // Handle socket connection status
-  useEffect(() => {
-    if (isConnected && messageQueueRef.current.length > 0) {
-      // Send queued messages when connection is restored
-      messageQueueRef.current.forEach(queuedMessage => {
-        socket.emit('send_message', queuedMessage);
-      });
-      messageQueueRef.current = [];
-    }
-  }, [isConnected, socket]);
-
-  // Cleanup typing timeout on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (typingTimeoutRef.current) {
@@ -55,32 +43,33 @@ const ChatInputMobile = ({
     };
   }, []);
 
-  const handleTypingIndicator = useCallback(() => {
-    if (!socket || !isConnected || !onTyping) return;
+  // Optimized typing indicator with debouncing
+  const handleTypingIndicator = useCallback(
+    debounce(() => {
+      if (!socket || !isConnected || !onTyping) return;
 
-    if (!isTyping) {
-      setIsTyping(true);
-      socket.emit('typing_start', { chatId, recipientId });
-      onTyping(true);
-    }
+      if (!isTyping) {
+        setIsTyping(true);
+        emitEvent('typing_start', { chatId, recipientId });
+        onTyping(true);
+      }
 
-    // Clear existing timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
 
-    // Set new timeout to stop typing indicator
-    typingTimeoutRef.current = setTimeout(() => {
-      setIsTyping(false);
-      socket.emit('typing_stop', { chatId, recipientId });
-      onTyping(false);
-    }, 1000);
-  }, [socket, isConnected, onTyping, chatId, recipientId, isTyping]);
+      typingTimeoutRef.current = setTimeout(() => {
+        setIsTyping(false);
+        emitEvent('typing_end', { chatId, recipientId });
+        onTyping(false);
+      }, 1000);
+    }, 300),
+    [socket, isConnected, onTyping, chatId, recipientId, isTyping, emitEvent]
+  );
 
   const handleInputChange = useCallback((e) => {
     const value = e.target.value;
     
-    // Enforce max length
     if (value.length > maxLength) {
       setError(`Message cannot exceed ${maxLength} characters`);
       return;
@@ -89,24 +78,19 @@ const ChatInputMobile = ({
     setMessage(value);
     setError('');
     
-    // Handle typing indicator
     if (value.trim() && !disabled) {
       handleTypingIndicator();
     }
   }, [maxLength, disabled, handleTypingIndicator]);
 
-  const generateMessageId = useCallback(() => {
-    return `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  }, []);
-
+  // Optimized message submission
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     
-    if (!message.trim() || isSending || disabled) return;
+    if (!message.trim() || isSending || disabled || !isConnected) return;
     
     const trimmedMessage = message.trim();
     
-    // Validate message
     if (trimmedMessage.length > maxLength) {
       setError(`Message cannot exceed ${maxLength} characters`);
       return;
@@ -120,20 +104,14 @@ const ChatInputMobile = ({
     setIsSending(true);
     setError('');
     
-    // Stop typing indicator
     if (isTyping) {
       setIsTyping(false);
-      if (socket && isConnected) {
-        socket.emit('typing_stop', { chatId, recipientId });
-      }
-      if (onTyping) {
-        onTyping(false);
-      }
+      emitEvent('typing_end', { chatId, recipientId });
+      onTyping?.(false);
     }
     
-    // Create message data
     const tempId = `temp-${Date.now()}`;
-    const messageId = generateMessageId();
+    const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
     const messageData = {
       tempId,
@@ -149,48 +127,20 @@ const ChatInputMobile = ({
         name: user.name,
         username: user.username,
         avatar: user.avatar
-      },
-      retryCount: retryCount
+      }
     };
     
     try {
-      // Provide optimistic UI update
-      if (onMessageSent) {
-        onMessageSent(messageData);
+      onMessageSent?.(messageData);
+      
+      // Send via socket
+      const success = emitEvent('send_message', messageData);
+      
+      if (!success) {
+        setError('Connection lost. Please try again.');
+        return;
       }
       
-      if (socket && isConnected) {
-        // Send message via socket
-        socket.emit('send_message', messageData);
-        
-        // Set up timeout for message delivery confirmation
-        const timeoutId = setTimeout(() => {
-          if (retryCount < 3) {
-            setRetryCount(prev => prev + 1);
-            setError('Message failed to send. Retrying...');
-            socket.emit('send_message', { ...messageData, retryCount: retryCount + 1 });
-          } else {
-            setError('Failed to send message. Please check your connection.');
-          }
-        }, 5000);
-        
-        // Listen for message confirmation
-        const handleMessageConfirmation = (data) => {
-          if (data.tempId === tempId) {
-            clearTimeout(timeoutId);
-            setRetryCount(0);
-            socket.off('message_sent', handleMessageConfirmation);
-          }
-        };
-        
-        socket.on('message_sent', handleMessageConfirmation);
-      } else {
-        // Queue message for later sending
-        messageQueueRef.current.push(messageData);
-        setError('Connection lost. Message will be sent when reconnected.');
-      }
-      
-      // Clear input
       setMessage('');
       
     } catch (err) {
@@ -199,11 +149,10 @@ const ChatInputMobile = ({
     } finally {
       setIsSending(false);
       
-      // Return focus to input
       if (inputRef.current) {
         setTimeout(() => {
           inputRef.current.focus();
-        }, 100);
+        }, 50);
       }
     }
   }, [
@@ -214,13 +163,11 @@ const ChatInputMobile = ({
     user, 
     chatId, 
     recipientId, 
-    socket, 
     isConnected, 
     onMessageSent, 
     onTyping, 
     isTyping, 
-    retryCount, 
-    generateMessageId
+    emitEvent
   ]);
 
   const handleKeyPress = useCallback((e) => {
@@ -235,25 +182,29 @@ const ChatInputMobile = ({
   const hasContent = message.trim().length > 0;
 
   return (
-    <div className="chat-input-mobile position-fixed bottom-0 start-0 end-0 bg-white dark:bg-neutral-800 border-top border-neutral-200 dark:border-neutral-700 shadow-lg p-3" style={{zIndex: 1050}}>
+    <div className="chat-input-mobile fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-neutral-800/95 backdrop-blur-xl border-t border-neutral-200 dark:border-neutral-700 shadow-lg p-3 z-50">
       {error && (
-        <div className="alert alert-danger alert-dismissible fade show mb-3 border-0 rounded-3 shadow-sm" role="alert" style={{fontSize: '0.875rem'}}>
-          <i className="bi bi-exclamation-triangle-fill me-2"></i>
+        <div className="bg-error-50 dark:bg-error-900/20 text-error-700 dark:text-error-400 p-2 rounded-lg mb-2 text-sm flex items-center justify-between">
+          <span className="flex items-center">
+            <i className="bi bi-exclamation-triangle-fill mr-2"></i>
           {error}
-          <button 
-            type="button" 
-            className="btn-close btn-close-sm opacity-75" 
-            aria-label="Close"
+          </span>
+          <button
             onClick={() => setError('')}
-          ></button>
+            className="text-error-500 hover:text-error-700 ml-2"
+          >
+            <i className="bi bi-x"></i>
+          </button>
         </div>
       )}
       
-      <form onSubmit={handleSubmit} className="d-flex align-items-center w-100">
-        <div className="input-group w-100 shadow-sm">
+      <form onSubmit={handleSubmit} className="flex items-center w-full">
+        <div className="flex w-full shadow-sm">
           <input
             type="text"
-            className={`form-control border-0 bg-neutral-100 dark:bg-neutral-700 rounded-start-pill px-4 py-3 ${error ? 'is-invalid' : ''}`}
+            className={`flex-1 border-0 bg-neutral-100 dark:bg-neutral-700 rounded-l-full px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all ${
+              error ? 'ring-2 ring-error-500' : ''
+            }`}
             placeholder={placeholder}
             value={message}
             onChange={handleInputChange}
@@ -261,70 +212,60 @@ const ChatInputMobile = ({
             disabled={isSending || disabled}
             ref={inputRef}
             aria-label="Message input"
-            aria-describedby={showCharCount ? "char-count" : undefined}
             autoComplete="off"
             maxLength={maxLength}
             style={{
-              fontSize: '16px', // Prevent zoom on iOS
-              transition: 'all 0.2s ease',
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)'
+              fontSize: '16px' // Prevent zoom on iOS
             }}
           />
           
           <button 
             type="submit"
-            className={`btn rounded-end-pill px-4 shadow-sm transition-all duration-200 ${
+            className={`rounded-r-full px-4 shadow-sm transition-all duration-200 ${
               hasContent 
-                ? 'btn-primary bg-gradient-to-r from-primary-500 to-primary-600 border-0' 
-                : 'btn-outline-primary border-0 bg-neutral-100 dark:bg-neutral-700'
+                ? 'bg-gradient-to-r from-primary-500 to-primary-600 text-white border-0' 
+                : 'bg-neutral-100 dark:bg-neutral-700 text-neutral-500 border-0'
             }`}
-            disabled={!hasContent || isSending || disabled || remainingChars < 0 || !isConnected}
+            disabled={!hasContent || isSending || disabled || !isConnected}
             aria-label="Send message"
-            title={!isConnected ? 'Not connected' : 'Send message'}
+            title={!isConnected ? 'Connecting...' : 'Send message'}
             style={{
               minWidth: '60px',
               height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
             }}
           >
             {isSending ? (
-              <div className="spinner-border spinner-border-sm" role="status" style={{width: '1rem', height: '1rem'}}>
-                <span className="visually-hidden">Sending...</span>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white">
               </div>
             ) : (
-              <i className="bi bi-send-fill" style={{fontSize: '1rem'}}></i>
+              <i className="bi bi-send-fill text-base"></i>
             )}
           </button>
         </div>
       </form>
       
       {showCharCount && (
-        <div className="d-flex justify-content-between align-items-center mt-2 px-1">
-          <small className="text-muted d-flex align-items-center gap-1">
+        <div className="flex justify-between items-center mt-2 px-1">
+          <small className="text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
             {!isConnected && (
-              <span className="text-warning d-flex align-items-center gap-1">
-                <i className="bi bi-exclamation-triangle-fill me-1"></i>
-                Not connected
+              <span className="text-warning-500 flex items-center gap-1">
+                <i className="bi bi-wifi-off mr-1"></i>
+                Connecting...
               </span>
             )}
             {isConnected && (
-              <span className="text-success d-flex align-items-center gap-1">
-                <i className="bi bi-wifi me-1"></i>
+              <span className="text-success-500 flex items-center gap-1">
+                <i className="bi bi-wifi mr-1"></i>
                 Connected
               </span>
             )}
           </small>
           <small 
-            id="char-count"
-            className={`font-medium ${
-              remainingChars < 0 ? 'text-danger' : 
-              isNearLimit ? 'text-warning' : 
-              'text-muted'
+            className={`font-medium text-xs ${
+              remainingChars < 0 ? 'text-error-500' : 
+              isNearLimit ? 'text-warning-500' : 
+              'text-neutral-500'
             }`}
-            style={{fontSize: '0.75rem'}}
           >
             {remainingChars} characters remaining
           </small>
