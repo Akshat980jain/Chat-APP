@@ -63,11 +63,13 @@ const determineApiUrl = () => {
         urlsToTry.push(`http://${subnet}.${i}:5000`);
       }
     });
+  }
   
   // Filter out any undefined/null values
   
   // Try connecting to each URL with a 3-second timeout
   let foundWorkingUrl = false;
+}
 // Optimized theme configuration
 const lightTheme = createTheme({
   palette: {
